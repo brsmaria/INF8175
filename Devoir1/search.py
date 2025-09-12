@@ -105,13 +105,25 @@ def depthFirstSearch(problem:SearchProblem)->List[Direction]:
 
 def breadthFirstSearch(problem:SearchProblem)->List[Direction]:
     """Search the shallowest nodes in the search tree first."""
+    state : tuple = problem.getStartState()
+    queue = util.Queue()
+    visited = set()
+    queue.push((state, []))
+    
+    while (not queue.isEmpty()) :
+        state, solution = queue.pop()
+        visited.add(state)
 
+        if problem.isGoalState(state):
+            return solution
 
-    '''
-        INSÉREZ VOTRE SOLUTION À LA QUESTION 2 ICI
-    '''
-
-    util.raiseNotDefined()
+        successors = problem.getSuccessors(state)
+        for successor in successors:
+            position, direction, _ = successor
+            if position not in visited :
+                newSolution = solution + [direction]
+                queue.push((position, newSolution))
+    return []
 
 def uniformCostSearch(problem:SearchProblem)->List[Direction]:
     """Search the node of least total cost first."""
