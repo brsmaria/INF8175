@@ -112,28 +112,46 @@ def breadthFirstSearch(problem:SearchProblem)->List[Direction]:
     
     while (not queue.isEmpty()) :
         state, solution = queue.pop()
-        visited.add(state)
+        if state in visited: 
+            continue # skipping this iteration since we already visited this state
 
         if problem.isGoalState(state):
             return solution
 
         successors = problem.getSuccessors(state)
         for successor in successors:
-            position, direction, _ = successor
-            if position not in visited :
+            newState, direction, _ = successor
+            if newState not in visited :
                 newSolution = solution + [direction]
-                queue.push((position, newSolution))
+                queue.push((newState, newSolution))
+
+        visited.add(state)
     return []
 
 def uniformCostSearch(problem:SearchProblem)->List[Direction]:
     """Search the node of least total cost first."""
+    state : tuple = problem.getStartState()
+    queue = util.PriorityQueue()
+    visited = set()
+    queue.push((state, [], 0), 0)
+    
+    while (not queue.isEmpty()) :
+        state, solution, accumulatedCost = queue.pop()
+        if state in visited: 
+            continue # skipping this iteration since we already visited this state
 
+        if problem.isGoalState(state):
+            return solution
 
-    '''
-        INSÉREZ VOTRE SOLUTION À LA QUESTION 3 ICI
-    '''
-
-    util.raiseNotDefined()
+        successors = problem.getSuccessors(state)
+        for successor in successors:
+            position, direction, cost = successor
+            if position not in visited :
+                newSolution = solution + [direction]
+                newCost = cost + accumulatedCost
+                queue.push((position, newSolution, newCost), newCost)
+        visited.add(state)
+    return []
 
 def nullHeuristic(state:GameState, problem:SearchProblem=None)->List[Direction]:
     """
