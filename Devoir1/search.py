@@ -17,10 +17,11 @@ In search.py, you will implement generic search algorithms which are called by
 Pacman agents (in searchAgents.py).
 """
 
+from typing import Any, List, Tuple
+
+import util
 from custom_types import Direction
 from pacman import GameState
-from typing import Any, Tuple,List
-import util
 
 """
 In search.py, you will implement generic search algorithms which are called by
@@ -69,7 +70,9 @@ class SearchProblem:
         """
         util.raiseNotDefined()
 
-
+# def getNextDirection(succesor:Tuple[Any,Direction,int])->Direction:
+#     direction = succesor[1][0]
+#     return DirectionEnum(direction)
 
 def tinyMazeSearch(problem:SearchProblem)->List[Direction]:
     """
@@ -95,12 +98,26 @@ def depthFirstSearch(problem:SearchProblem)->List[Direction]:
     print("Is the start a goal?", problem.isGoalState(problem.getStartState()))
     print("Start's successors:", problem.getSuccessors(problem.getStartState()))
     """
+    fringe = util.Stack()
+    visitedStates = set()
 
-    '''
-        INSÉREZ VOTRE SOLUTION À LA QUESTION 1 ICI
-    '''
+    currentState = problem.getStartState()
+    fringe.push((currentState, []))
 
-    util.raiseNotDefined()
+    while not fringe.isEmpty():
+        currentState, direction = fringe.pop()
+
+        if problem.isGoalState(currentState):
+            return direction
+        
+        elif currentState not in visitedStates:
+            successors = problem.getSuccessors(currentState)
+            for successor in successors:
+                if successor[0] not in visitedStates:
+                    fringe.push((successor[0], direction + [successor[1]]))
+            visitedStates.add(currentState)
+
+    return []
 
 
 def breadthFirstSearch(problem:SearchProblem)->List[Direction]:
