@@ -37,12 +37,12 @@ description for details.
 Good luck and happy searching!
 """
 
-from game import Directions
-from game import Agent
-from game import Actions
-import util
 import time
+
 import search
+import util
+from game import Actions, Agent, Directions
+
 
 class GoWestAgent(Agent):
     "An agent that goes West until it can't."
@@ -361,14 +361,18 @@ def cornersHeuristic(state, problem):
     shortest path from the state to a goal of the problem; i.e.  it should be
     admissible (as well as consistent).
     """
-    corners = problem.corners # These are the corner coordinates
-    walls = problem.walls # These are the walls of the maze, as a Grid (game.py)
+    #getSuccessors function returns a list of triples, (successor, action, stepCost)
+    heuristicCost = 0
 
-    '''
-        INSÉREZ VOTRE SOLUTION À LA QUESTION 6 ICI
-    '''
-    
-    return 0
+    currentPosition, unvisitedCorners = state
+    while len(unvisitedCorners) > 0:
+        manhattanDistance = [(util.manhattanDistance(currentPosition, corner), corner) for corner in unvisitedCorners]
+        manhattanDistance.sort()
+        heuristicCost += manhattanDistance[0][0]
+        currentPosition = manhattanDistance[0][1]
+        unvisitedCorners = tuple(filter(lambda corner: corner != currentPosition, unvisitedCorners))
+        
+    return heuristicCost
 
 class AStarCornersAgent(SearchAgent):
     "A SearchAgent for FoodSearchProblem using A* and your foodHeuristic"
@@ -460,12 +464,6 @@ def foodHeuristic(state, problem: FoodSearchProblem):
     Subsequent calls to this heuristic can access
     problem.heuristicInfo['wallCount']
     """
-    position, foodGrid = state
-
-    '''
-        INSÉREZ VOTRE SOLUTION À LA QUESTION 7 ICI
-    '''
-
 
     return 0
 
