@@ -120,10 +120,10 @@ def breadthFirstSearch(problem:SearchProblem)->List[Direction]:
 
         successors = problem.getSuccessors(state)
         for successor in successors:
-            newState, direction, _ = successor
-            if newState not in visited :
-                newSolution = solution + [direction]
-                queue.push((newState, newSolution))
+            nextState, direction, _ = successor
+            if nextState not in visited :
+                nextSolution = solution + [direction]
+                queue.push((nextState, nextSolution))
 
         visited.add(state)
     return []
@@ -135,7 +135,7 @@ def uniformCostSearch(problem:SearchProblem)->List[Direction]:
     visited = set()
     queue.push((state, [], 0), 0)
     
-    while (not queue.isEmpty()) :
+    while (not queue.isEmpty()):
         state, solution, accumulatedCost = queue.pop()
         if state in visited: 
             continue # skipping this iteration since we already visited this state
@@ -146,10 +146,10 @@ def uniformCostSearch(problem:SearchProblem)->List[Direction]:
         successors = problem.getSuccessors(state)
         for successor in successors:
             position, direction, cost = successor
-            if position not in visited :
-                newSolution = solution + [direction]
-                newCost = cost + accumulatedCost
-                queue.push((position, newSolution, newCost), newCost)
+            if position not in visited:
+                nextSolution = solution + [direction]
+                nextCost = cost + accumulatedCost
+                queue.push((position, nextSolution, nextCost), nextCost)
         visited.add(state)
     return []
 
