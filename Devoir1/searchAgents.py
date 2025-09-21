@@ -464,6 +464,14 @@ def foodHeuristic(state, problem: FoodSearchProblem):
     Subsequent calls to this heuristic can access
     problem.heuristicInfo['wallCount']
     """
+    position, foodGrid = state
+    foodList = foodGrid.asList()
 
-    return 0
+    if len(foodList) == 0:
+        return 0
+    
+    longestDistance = max([util.manhattanDistance(position, food) for food in foodList])
+    print(longestDistance)
+
+    return longestDistance
 
