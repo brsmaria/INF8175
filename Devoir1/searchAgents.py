@@ -470,8 +470,12 @@ def foodHeuristic(state, problem: FoodSearchProblem):
     if len(foodList) == 0:
         return 0
     
-    longestDistance = max([util.manhattanDistance(position, food) for food in foodList])
-    print(longestDistance)
+    foodDistances = []
+    
+    for food in foodList:
+        foodProblem = PositionSearchProblem(problem.startingGameState, start=position, goal=food, warn=False, visualize=False)
+        foodDistances.append(len(search.bfs(foodProblem)))
 
+    longestDistance = max(foodDistances)
     return longestDistance
 
