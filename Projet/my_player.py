@@ -32,6 +32,40 @@ class MyPlayer(PlayerHex):
         Returns:
             Action: The best action as determined by minimax.
         """
+        return self.minimax_search(current_state)
 
-        #TODO
-        raise MethodNotImplementedError()
+    def minimax_search(self, current_state: GameState) -> Action:
+        best_action, _ = self.max_value(current_state)
+        return best_action
+
+    def max_value(self, current_state: GameState):
+        current_score: int = 0
+        best_action : Action = None
+
+        if current_state.is_done():
+            return (best_action, current_score)
+
+        for action in current_state.get_possible_light_actions():
+            potential_action = current_state.apply_action(action)
+            _, potential_score = self.min_value(potential_action)
+
+            if potential_score > current_score:
+                current_score = potential_score
+                best_action = action
+        return (best_action, current_score)
+
+    def min_value(self, current_state: GameState):
+        current_score: int = 0
+        best_action : Action = None
+
+        if current_state.is_done():
+            return (best_action, current_score)
+
+        for action in current_state.get_possible_light_actions():
+            potential_action = current_state.apply_action(action)
+            _, potential_score = self.max_value(potential_action)
+
+            if potential_score < current_score:
+                current_score = potential_score
+                best_action = action
+        return (best_action, current_score)
