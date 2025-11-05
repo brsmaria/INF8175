@@ -1,5 +1,5 @@
-% NOM_ETUDIANT_1 (MATRICULE_1)
-% NOM_ETUDIANT_2 (MATRICULE_2)
+% Maria Bourouisa (2211827)
+% Ihsane Majdoubi (2125034)
 
 include "globals.mzn"; 
 
@@ -48,8 +48,37 @@ var int: temps_trajet;
 %-----------------------------------------------------------------------------%
 % Partie étudiant
 %-----------------------------------------------------------------------------%
+%Contrainte: Le trajet de termine par un retour à la première ville
+constraint chemin_tournee[n] = 1;
+constraint forall(i in 1..n-1) (circuit_tournee[chemin_tournee[i]] = chemin_tournee[i+1]);
 
+%Contrainte: Visiter toutes les villes une seule fois
+constraint all_different(chemin_tournee);
 
+%Contrainte: Arriver dans chaque ville dans la fenêtre de temps permise + ne pas arriver en retard
+%Pour cela on doir dabord calculer le temps cumulé avant d'entrer dans chaque ville
+constraint cumul_temps[1] = distance[1, chemin_tournee[1]] + temps_attente[chemin_tournee[1]];
+constraint forall(i in 2..n)(
+  cumul_temps[i] =
+    cumul_temps[i-1] + temps_attente[chemin_tournee[i]]
+  + distance[chemin_tournee[i-1], chemin_tournee[i]]
+);
+
+%Ensuite on impose les contraintes sur les fenêtres d'arrivée
+constraint forall(i in 1..n) (cumul_temps[i]>= fenetre_arrivee[chemin_tournee[i], 1] 
+                              /\ cumul_temps[i]<= fenetre_arrivee[chemin_tournee[i], 2]);
+  
+%Contrainte: Calcul du temps total du trajet
+constraint temps_trajet = cumul_temps[n];
+
+% Nous avons utilisé une contrainte qui permet d'optimiser la recherche solve::int_search [2]
+%Celle ci nous permet de forcer la priorité dans l'ordre de recherche à travers le choix des paramètres
+% Paramètre 1: chemin_tournee qui est l'espace de recherche (l'ordre des villes)
+% Paramètre 2: first_fail qui permet de choisir la variable avec le domaine le plus petit en premier donc celle qui a le moins de possibilités
+% Paramètre 3: indomain_min qui permet de choisir la plus petite valeur possible dans le domaine de la variable choisie puisque le but est 
+% de minimiser le temps de trajet
+
+solve :: int_search(chemin_tournee, first_fail, indomain_min) minimize temps_trajet;
 %-----------------------------------------------------------------------------%
 
 output [
@@ -60,3 +89,5 @@ output [
   "Temps d'attente total                  : \(total_temps_attentes)\n",
   "Temps de trajet total                  : \(temps_trajet)\n",
 ];
+
+%[2] https://github.com/MiniZinc/MiniZincIDE/blob/master/MiniZincIDE/cheat_sheet.mzn

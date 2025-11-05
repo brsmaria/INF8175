@@ -38,6 +38,7 @@ constraint alldifferent(choix_final);
 %Contrainte: deux acteurs voisins, selon l’ordre lexicographique, ne jouent pas un rôle adjacent.
 %Dans la liste d'assignation de rôles, on compare le rôle de chaque acteur avec celui de l'acteur
 %suivant, on ne passe pas par le dernier acteur car la validation aura déjà été faite
+
 constraint forall(i in 1..n-1)(assignation_role[i] != assignation_role[i+1] + 1
                             /\ assignation_role[i] != assignation_role[i+1] - 1);
 
