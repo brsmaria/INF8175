@@ -1,5 +1,8 @@
+from math import inf
+
 from seahorse.game.action import Action
 from seahorse.game.game_state import GameState
+from seahorse.game.heavy_action import HeavyAction
 from seahorse.game.light_action import LightAction
 from seahorse.utils.custom_exceptions import MethodNotImplementedError
 
@@ -38,39 +41,47 @@ class MyPlayer(PlayerHex):
         return self.minimax_search(current_state)
 
     def minimax_search(self, current_state: GameState) -> Action:
-        best_action, _ = self.max_value(current_state, None, None)
-        return best_action
+        _, best_heavy_action = self.max_value(current_state)
+        return current_state.convert_heavy_action_to_light_action(best_heavy_action)
 
-    def max_value(self, current_state: GameState, alpha: int = None, beta: int = None):
-        current_score: int = 0
-        best_action : LightAction = None
-
+    def max_value(self, current_state: GameState):
         if current_state.is_done():
-            return (best_action, current_score)
+            return (current_state.get_player_score(self) ,None)
+        
+        best_score: int = -inf
+        best_heavy_action: HeavyAction = None
 
-        for action in current_state.get_possible_light_actions():
-            potential_action = current_state.apply_action(action)
-            _, potential_score = self.min_value(potential_action, alpha, beta)
+        for heavy_action in current_state.generate_possible_heavy_actions():
+            next_state = heavy_action.get_next_game_state()
+            score, _ = self.min_value(next_state)
 
-            if potential_score > current_score:
-                current_score = potential_score
-                best_action = action
-                alpha = max(alpha, current_score) if alpha is not None else current_score
-        return (best_action, current_score)
+            if score > best_score:
+                best_score = score
+                best_heavy_action = heavy_action
+        return (best_score, best_heavy_action)
 
-    def min_value(self, current_state: GameState, alpha: int = None, beta: int = None):
-        current_score: int = 0
-        best_action : LightAction = None
-
+    def min_value(self, current_state: GameState):
         if current_state.is_done():
-            return (best_action, current_score)
+            return (current_state.get_player_score(self) ,None)
+        
+        best_score: int = inf
+        best_heavy_action: HeavyAction = None
 
-        for action in current_state.get_possible_light_actions():
-            potential_action = current_state.apply_action(action)
-            _, potential_score = self.max_value(potential_action, alpha, beta)
+        for heavy_action in current_state.generate_possible_heavy_actions():
+            next_state = heavy_action.get_next_game_state()
+            score, _ = self.max_value(next_state)
+            print(self.heuristic_evalutation(next_state))
+            if score < best_score:
+                best_score = score
+                best_heavy_action = heavy_action
+        return (best_score, best_heavy_action)
+    
+    def heuristic_evalutation(self, state: GameStateHex) -> float:
+        my_piece = self.piece_type
+        opp_piece = "B" if my_piece == "R" else "R"
 
-            if potential_score < current_score:
-                current_score = potential_score
-                best_action = action
-                beta = min(beta, current_score) if beta is not None else current_score
-        return (best_action, current_score)
+        env = state.rep.env
+        my_count = sum(1 for p in env.values() if p.get_type() == my_piece)
+        opp_count = sum(1 for p in env.values() if p.get_type() == opp_piece)
+
+        return (my_count - opp_count)
