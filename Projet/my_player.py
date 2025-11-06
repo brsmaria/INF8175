@@ -27,7 +27,7 @@ class MyPlayer(PlayerHex):
             name (str, optional): Name of the player (default is "bob")
         """
         super().__init__(piece_type, name)
-        self._max_depth = 2  # <-- NEW: profondeur maximale (ajuste à 2/3/4 selon le temps)
+        self._max_depth = 1  # <-- NEW: profondeur maximale (ajuste à 2/3/4 selon le temps)
 
     def compute_action(self, current_state: GameState, remaining_time: int = 1e9, **kwargs) -> Action:
         """
