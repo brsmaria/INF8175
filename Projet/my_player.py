@@ -1,8 +1,11 @@
-from player_hex import PlayerHex
 from seahorse.game.action import Action
 from seahorse.game.game_state import GameState
-from game_state_hex import GameStateHex
+from seahorse.game.light_action import LightAction
 from seahorse.utils.custom_exceptions import MethodNotImplementedError
+
+from game_state_hex import GameStateHex
+from player_hex import PlayerHex
+
 
 class MyPlayer(PlayerHex):
     """
@@ -35,37 +38,39 @@ class MyPlayer(PlayerHex):
         return self.minimax_search(current_state)
 
     def minimax_search(self, current_state: GameState) -> Action:
-        best_action, _ = self.max_value(current_state)
+        best_action, _ = self.max_value(current_state, None, None)
         return best_action
 
-    def max_value(self, current_state: GameState):
+    def max_value(self, current_state: GameState, alpha: int = None, beta: int = None):
         current_score: int = 0
-        best_action : Action = None
+        best_action : LightAction = None
 
         if current_state.is_done():
             return (best_action, current_score)
 
         for action in current_state.get_possible_light_actions():
             potential_action = current_state.apply_action(action)
-            _, potential_score = self.min_value(potential_action)
+            _, potential_score = self.min_value(potential_action, alpha, beta)
 
             if potential_score > current_score:
                 current_score = potential_score
                 best_action = action
+                alpha = max(alpha, current_score) if alpha is not None else current_score
         return (best_action, current_score)
 
-    def min_value(self, current_state: GameState):
+    def min_value(self, current_state: GameState, alpha: int = None, beta: int = None):
         current_score: int = 0
-        best_action : Action = None
+        best_action : LightAction = None
 
         if current_state.is_done():
             return (best_action, current_score)
 
         for action in current_state.get_possible_light_actions():
             potential_action = current_state.apply_action(action)
-            _, potential_score = self.max_value(potential_action)
+            _, potential_score = self.max_value(potential_action, alpha, beta)
 
             if potential_score < current_score:
                 current_score = potential_score
                 best_action = action
+                beta = min(beta, current_score) if beta is not None else current_score
         return (best_action, current_score)
