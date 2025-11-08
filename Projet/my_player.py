@@ -27,7 +27,7 @@ class MyPlayer(PlayerHex):
             name (str, optional): Name of the player (default is "bob")
         """
         super().__init__(piece_type, name)
-        self._max_depth = 1  # <-- NEW: profondeur maximale (ajuste à 2/3/4 selon le temps)
+        self._max_depth = 3
 
     def compute_action(self, current_state: GameState, remaining_time: int = 1e9, **kwargs) -> Action:
         """
@@ -41,11 +41,11 @@ class MyPlayer(PlayerHex):
         """
         return self.minimax_search(current_state)
 
-    def minimax_search(self, current_state: GameState) -> Action:
-        _, best_heavy_action = self.max_value(current_state, self._max_depth)
+    def minimax_search(self, current_state: GameState, alpha: int = inf, beta: int = -inf) -> Action:
+        _, best_heavy_action = self.max_value(current_state, self._max_depth, alpha, beta)
         return current_state.convert_heavy_action_to_light_action(best_heavy_action)
 
-    def max_value(self, current_state: GameState, depth: int):
+    def max_value(self, current_state: GameState, depth: int, alpha: int, beta: int):
         if current_state.is_done():
             return (current_state.get_player_score(self), None)
         if depth == 0:
@@ -56,14 +56,16 @@ class MyPlayer(PlayerHex):
 
         for heavy_action in current_state.generate_possible_heavy_actions():
             next_state = heavy_action.get_next_game_state()
-            score, _ = self.min_value(next_state, depth - 1)
+            score, _ = self.min_value(next_state, depth - 1, alpha, beta)
             if score > best_score:
                 best_score = score
                 best_heavy_action = heavy_action
+                alpha = max(alpha, best_score)
+            if beta <= alpha:
+                break
         return (best_score, best_heavy_action)
 
-    # <-- NEW: ajout du paramètre depth et cutoff
-    def min_value(self, current_state: GameState, depth: int):
+    def min_value(self, current_state: GameState, depth: int, alpha: int, beta: int):
         if current_state.is_done():
             return (current_state.get_player_score(self), None)
         if depth == 0:
@@ -74,10 +76,13 @@ class MyPlayer(PlayerHex):
 
         for heavy_action in current_state.generate_possible_heavy_actions():
             next_state = heavy_action.get_next_game_state()
-            score, _ = self.max_value(next_state, depth - 1)
+            score, _ = self.max_value(next_state, depth - 1, alpha, beta)
             if score < best_score:
                 best_score = score
                 best_heavy_action = heavy_action
+                beta = min(beta, best_score)
+            if beta <= alpha:
+                break
         return (best_score, best_heavy_action)
 
     def heuristic_evalutation(self, state: GameStateHex) -> float:
