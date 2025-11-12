@@ -33,7 +33,52 @@ class MyPlayer(PlayerHex):
         Returns:
             Action: The best action as determined by minimax.
         """
+        if self.is_opening_move(current_state):
+            return self.opening_strategy(current_state)
+
         return self.minimax_search(current_state)
+    
+    def is_opening_move(self, current_state: GameStateHex) -> bool:
+        env = current_state.rep.env
+        num_pieces = len(env)
+        return num_pieces <= 1
+    
+    def opening_strategy(self, current_state: GameStateHex) -> LightAction:
+        """Stratégie d'ouverture pour Hex"""
+        env = current_state.rep.env
+        board_size = current_state.rep.get_dimensions()[0]
+        center = board_size // 2 - 1
+        
+        if len(env) == 0:
+            # Premier joueur : centre
+            row, col = center, center
+            
+        elif len(env) == 1:
+            # Deuxième joueur
+            opp_row, opp_col = list(env.keys())[0]
+            
+            # Vérifier si adversaire au centre (rayon 2)
+            dist_center = abs(opp_row - center) + abs(opp_col - center)
+            
+            if dist_center <= 2:
+                # Adversaire proche du centre → Jouer une réponse "shape"
+                # "lean toward your connection direction"
+                
+                if self.piece_type == "R":  # Rouge connecte HAUT-BAS
+                    # Jouer proche du centre, mais vers le HAUT ou BAS
+                    row = center - 1  # Légèrement vers le haut
+                    col = center
+                else:  # Bleu connecte GAUCHE-DROITE
+                    # Jouer proche du centre, mais vers la GAUCHE ou DROITE
+                    row = center
+                    col = center - 1  # Légèrement vers la gauche
+            else:
+                # Adversaire loin du centre → Prendre le centre
+                row, col = center, center
+        else:
+            row, col = center, center
+            
+        return LightAction({"piece": self.piece_type, "position": (row, col)})
 
     def minimax_search(self, current_state: GameState) -> Action:
         _, best_action = self.max_value(current_state, self.max_depth)
