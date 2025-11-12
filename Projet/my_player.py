@@ -1,8 +1,8 @@
 from player_hex import PlayerHex
 from seahorse.game.action import Action
+from seahorse.game.light_action import LightAction
 from seahorse.game.game_state import GameState
 from game_state_hex import GameStateHex
-from seahorse.utils.custom_exceptions import MethodNotImplementedError
 
 class MyPlayer(PlayerHex):
     """
@@ -21,6 +21,7 @@ class MyPlayer(PlayerHex):
             name (str, optional): Name of the player (default is "bob")
         """
         super().__init__(piece_type, name)
+        self.max_depth = 2
 
     def compute_action(self, current_state: GameState, remaining_time: int = 1e9, **kwargs) -> Action:
         """
@@ -35,37 +36,56 @@ class MyPlayer(PlayerHex):
         return self.minimax_search(current_state)
 
     def minimax_search(self, current_state: GameState) -> Action:
-        best_action, _ = self.max_value(current_state)
+        _, best_action = self.max_value(current_state, self.max_depth)
         return best_action
 
-    def max_value(self, current_state: GameState):
-        current_score: int = 0
-        best_action : Action = None
-
+    def max_value(self, current_state: GameState, depth: int):
         if current_state.is_done():
-            return (best_action, current_score)
+            return (current_state.get_player_score(self), None)
+        
+        if depth == 0:
+            return (self.evaluate_state(current_state), None)
+        
+        current_score: float = float('-inf')
+        best_action: LightAction | None = None
 
         for action in current_state.get_possible_light_actions():
             potential_action = current_state.apply_action(action)
-            _, potential_score = self.min_value(potential_action)
+            potential_score, _ = self.min_value(potential_action, depth - 1)
 
             if potential_score > current_score:
                 current_score = potential_score
                 best_action = action
-        return (best_action, current_score)
+                
+        return (current_score, best_action)
 
-    def min_value(self, current_state: GameState):
-        current_score: int = 0
-        best_action : Action = None
-
+    def min_value(self, current_state: GameState, depth: int):
         if current_state.is_done():
-            return (best_action, current_score)
+            return (current_state.get_player_score(self), None)
+        
+        if depth == 0:
+            return (self.evaluate_state(current_state), None)
+        
+        current_score: float = float('inf')
+        best_action: LightAction | None = None
 
         for action in current_state.get_possible_light_actions():
             potential_action = current_state.apply_action(action)
-            _, potential_score = self.max_value(potential_action)
+            potential_score, _ = self.max_value(potential_action, depth - 1)
 
             if potential_score < current_score:
                 current_score = potential_score
                 best_action = action
-        return (best_action, current_score)
+                
+        return (current_score, best_action)
+    
+    def evaluate_state(self, current_state: GameStateHex) -> float:
+        """Évalue un état non-terminal"""
+        my_piece = self.piece_type
+        opp_piece = "B" if my_piece == "R" else "R"
+        env = current_state.rep.env
+        
+        my_count = sum(1 for p in env.values() if p.get_type() == my_piece)
+        opp_count = sum(1 for p in env.values() if p.get_type() == opp_piece)
+        
+        return float(my_count - opp_count)
