@@ -81,10 +81,10 @@ class MyPlayer(PlayerHex):
         return LightAction({"piece": self.piece_type, "position": (row, col)})
 
     def minimax_search(self, current_state: GameState) -> Action:
-        _, best_action = self.max_value(current_state, self.max_depth)
+        _, best_action = self.max_value(current_state, self.max_depth, float('-inf'), float('inf'))
         return best_action
 
-    def max_value(self, current_state: GameState, depth: int):
+    def max_value(self, current_state: GameState, depth: int, alpha: float, beta: float):
         if current_state.is_done():
             return (current_state.get_player_score(self), None)
         
@@ -96,15 +96,19 @@ class MyPlayer(PlayerHex):
 
         for action in current_state.get_possible_light_actions():
             potential_action = current_state.apply_action(action)
-            potential_score, _ = self.min_value(potential_action, depth - 1)
+            potential_score, _ = self.min_value(potential_action, depth - 1, alpha, beta)
 
             if potential_score > current_score:
                 current_score = potential_score
                 best_action = action
+            
+            alpha = max(alpha, current_score)
+            if current_score >= beta:
+                break 
                 
         return (current_score, best_action)
 
-    def min_value(self, current_state: GameState, depth: int):
+    def min_value(self, current_state: GameState, depth: int, alpha: float, beta: float):
         if current_state.is_done():
             return (current_state.get_player_score(self), None)
         
@@ -116,11 +120,15 @@ class MyPlayer(PlayerHex):
 
         for action in current_state.get_possible_light_actions():
             potential_action = current_state.apply_action(action)
-            potential_score, _ = self.max_value(potential_action, depth - 1)
+            potential_score, _ = self.max_value(potential_action, depth - 1, alpha, beta)
 
             if potential_score < current_score:
                 current_score = potential_score
                 best_action = action
+            
+            beta = min(beta, current_score)
+            if current_score <= alpha:
+                break 
                 
         return (current_score, best_action)
     
