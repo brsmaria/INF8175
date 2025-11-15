@@ -217,7 +217,6 @@ class MyPlayer(PlayerHex):
 
 
     def heuristic_evalutation(self, state: GameStateHex) -> float:
-        w1, w2 = 1.0, 0.2
         my_piece  = self.piece_type
         opp_piece = "B" if my_piece == "R" else "R"
 
@@ -232,9 +231,8 @@ class MyPlayer(PlayerHex):
         if d_me >= 10**9: d_me = 1000
         if d_opp >= 10**9: d_opp = 1000
 
-        print(f"Heuristic evaluation: d_me={d_me}, d_opp={d_opp}, my_count={my_count}, opp_count={opp_count}")
 
-        return w1 * (d_opp - d_me) + w2 * (my_count - opp_count)
+        return d_opp - d_me 
 
 
     
