@@ -86,7 +86,11 @@ class MyPlayer(PlayerHex):
 
     def max_value(self, current_state: GameState, depth: int, alpha: float, beta: float):
         if current_state.is_done():
-            return (current_state.get_player_score(self), None)
+            score = current_state.get_player_score(self)
+            if score == 1: # C'est une victoire pour nous
+                return (float('inf'), None)
+            else: # C'est une défaite ou une égalité
+                return (float('-inf'), None)
         
         if depth == 0:
             return (self.evaluate_state(current_state), None)
@@ -110,7 +114,11 @@ class MyPlayer(PlayerHex):
 
     def min_value(self, current_state: GameState, depth: int, alpha: float, beta: float):
         if current_state.is_done():
-            return (current_state.get_player_score(self), None)
+            score = current_state.get_player_score(self)
+            if score == 1: # C'est une victoire pour l'adversaire (du point de vue de max_value)
+                return (float('inf'), None)
+            else: # C'est une défaite pour l'adversaire
+                return (float('-inf'), None)
         
         if depth == 0:
             return (self.evaluate_state(current_state), None)
@@ -133,12 +141,87 @@ class MyPlayer(PlayerHex):
         return (current_score, best_action)
     
     def evaluate_state(self, current_state: GameStateHex) -> float:
-        """Évalue un état non-terminal"""
-        my_piece = self.piece_type
-        opp_piece = "B" if my_piece == "R" else "R"
-        env = current_state.rep.env
+        """
+        Évalue un état non-terminal en utilisant l'algorithme de Dijkstra pour trouver
+        le coût du plus court chemin pour chaque joueur.
+        L'heuristique est la différence entre le coût du chemin de l'adversaire et celui du joueur.
+        """
+        my_path_cost = self.dijkstra_path_cost(current_state, self.piece_type)
         
-        my_count = sum(1 for p in env.values() if p.get_type() == my_piece)
-        opp_count = sum(1 for p in env.values() if p.get_type() == opp_piece)
+        opponent_piece = "B" if self.piece_type == "R" else "R"
+        opponent_path_cost = self.dijkstra_path_cost(current_state, opponent_piece)
+
+        # Un coût plus faible est meilleur. Nous voulons maximiser (opp_cost - my_cost).
+        return opponent_path_cost - my_path_cost
+
+    def dijkstra_path_cost(self, current_state: GameStateHex, piece_type: str) -> float:
+        """
+        Calcule le coût du plus court chemin pour un joueur donné en utilisant Dijkstra.
+        """
+        import heapq
+
+        board = current_state.get_rep().get_env()
+        size = current_state.get_rep().get_dimensions()[0]
         
-        return float(my_count - opp_count)
+        # Nœuds de départ virtuels et d'arrivée virtuels pour gérer les bords
+        start_node = (-1, -1)
+        end_node = (-2, -2)
+
+        distances = { (r, c): float('inf') for r in range(size) for c in range(size) }
+        distances[start_node] = 0
+        
+        pq = [(0, start_node)]
+
+        while pq:
+            dist, current_pos = heapq.heappop(pq)
+
+            if dist > distances.get(current_pos, float('inf')):
+                continue
+            
+            if current_pos == end_node:
+                return dist # Chemin trouvé
+
+            # Gérer la connexion du nœud de départ aux bords appropriés
+            if current_pos == start_node:
+                if piece_type == "R": # Haut-Bas
+                    neighbors = [(0, c) for c in range(size)]
+                else: # Gauche-Droite
+                    neighbors = [(r, 0) for r in range(size)]
+            else:
+                # On récupère le dictionnaire des voisins
+                raw_neighbors = current_state.get_neighbours(current_pos[0], current_pos[1])
+                # On extrait uniquement les coordonnées des voisins qui sont sur le plateau
+                neighbors = []
+                for neighbor_info in raw_neighbors.values():
+                    neighbor_type, neighbor_pos = neighbor_info
+                    if neighbor_type != "OUTSIDE":
+                        neighbors.append(neighbor_pos)
+
+            for neighbor_pos in neighbors:
+                # Coût pour se déplacer vers le voisin
+                cell_content = board.get(neighbor_pos)
+                if cell_content is None: # Case vide
+                    cost = 1
+                elif cell_content.get_type() == piece_type: # Notre pièce
+                    cost = 0
+                else: # Pièce adverse
+                    cost = float('inf')
+
+                # Si le voisin est sur le bord d'arrivée, le connecter au nœud final
+                is_end_border = False
+                if piece_type == "R" and neighbor_pos[0] == size - 1:
+                    is_end_border = True
+                elif piece_type == "B" and neighbor_pos[1] == size - 1:
+                    is_end_border = True
+
+                if is_end_border:
+                    if distances[start_node] + cost < distances.get(end_node, float('inf')):
+                        distances[end_node] = distances[start_node] + cost if current_pos == start_node else dist + cost
+                        heapq.heappush(pq, (distances[end_node], end_node))
+                
+                # Mise à jour de la distance normale pour les autres nœuds
+                elif dist + cost < distances.get(neighbor_pos, float('inf')):
+                    distances[neighbor_pos] = dist + cost
+                    heapq.heappush(pq, (distances[neighbor_pos], neighbor_pos))
+
+        return distances.get(end_node, float('inf'))
