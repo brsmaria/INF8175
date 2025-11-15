@@ -82,14 +82,17 @@ class MyPlayer(PlayerHex):
 
     def minimax_search(self, current_state: GameState) -> Action:
         _, best_action = self.max_value(current_state, self.max_depth, float('-inf'), float('inf'))
+
+        if best_action is None:
+            return list(current_state.get_possible_light_actions())[0]
         return best_action
 
     def max_value(self, current_state: GameState, depth: int, alpha: float, beta: float):
         if current_state.is_done():
             score = current_state.get_player_score(self)
-            if score == 1: # C'est une victoire pour nous
+            if score == 1: # Victoire pour nous (MAX)
                 return (float('inf'), None)
-            else: # C'est une défaite ou une égalité
+            else: # Défaite pour nous (MAX)
                 return (float('-inf'), None)
         
         if depth == 0:
@@ -115,10 +118,10 @@ class MyPlayer(PlayerHex):
     def min_value(self, current_state: GameState, depth: int, alpha: float, beta: float):
         if current_state.is_done():
             score = current_state.get_player_score(self)
-            if score == 1: # C'est une victoire pour l'adversaire (du point de vue de max_value)
-                return (float('inf'), None)
-            else: # C'est une défaite pour l'adversaire
+            if score == 1: # Victoire pour MAX, donc pire score pour MIN
                 return (float('-inf'), None)
+            else: # Défaite pour MAX, donc meilleur score pour MIN
+                return (float('inf'), None)
         
         if depth == 0:
             return (self.evaluate_state(current_state), None)
