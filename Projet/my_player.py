@@ -182,6 +182,8 @@ class MyPlayer(PlayerHex):
                 current_state,
                 list(current_state.generate_possible_heavy_actions()),
                 self.piece_type):
+            if heavy_action.get_next_game_state().is_done():
+                return (heavy_action.get_next_game_state().get_player_score(self), heavy_action)
             next_state = heavy_action.get_next_game_state()
             score, _ = self.min_value(next_state, depth - 1, alpha, beta)
             if score > best_score:
@@ -205,6 +207,8 @@ class MyPlayer(PlayerHex):
                 current_state,
                 list(current_state.generate_possible_heavy_actions()),
                 "B" if self.piece_type == "R" else "R"):  # on privilégie les "finishers" de l’adversaire pour les bloquer
+            if heavy_action.get_next_game_state().is_done():
+                return (heavy_action.get_next_game_state().get_player_score(self), heavy_action)
             next_state = heavy_action.get_next_game_state()
             score, _ = self.max_value(next_state, depth - 1, alpha, beta)
             if score < best_score:
@@ -224,13 +228,18 @@ class MyPlayer(PlayerHex):
         my_count  = sum(1 for p in env.values() if p.get_type() == my_piece)
         opp_count = sum(1 for p in env.values() if p.get_type() == opp_piece)
 
-        d_me, _  = self._shannon_path_empty_cells(state, my_piece)
+        d_me, test  = self._shannon_path_empty_cells(state, my_piece)
         d_opp, _ = self._shannon_path_empty_cells(state, opp_piece)
 
         # si pas de chemin (bloqué par murs), traite comme très défavorable/favorable
         if d_me >= 10**9: d_me = 1000
         if d_opp >= 10**9: d_opp = 1000
 
+        if len(test) == 1:
+            print("Only one move to win!")
+            d_me = 0
+
+        print(f"Heuristic eval: my_count={my_count}, opp_count={opp_count}, d_me={d_me}, d_opp={d_opp}")
 
         return d_opp - d_me 
 
