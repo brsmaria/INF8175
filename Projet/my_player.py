@@ -1,8 +1,10 @@
-from player_hex import PlayerHex
 from seahorse.game.action import Action
-from seahorse.game.light_action import LightAction
 from seahorse.game.game_state import GameState
+from seahorse.game.light_action import LightAction
+
 from game_state_hex import GameStateHex
+from player_hex import PlayerHex
+
 
 class MyPlayer(PlayerHex):
     """
@@ -101,7 +103,10 @@ class MyPlayer(PlayerHex):
         current_score: float = float('-inf')
         best_action: LightAction | None = None
 
-        for action in current_state.get_possible_light_actions():
+        for heavy_action in current_state.generate_possible_heavy_actions():
+            action = current_state.convert_heavy_action_to_light_action(heavy_action) #light_Action
+            if heavy_action.get_next_game_state().is_done():
+                return (heavy_action.get_next_game_state().get_player_score(self), action)
             potential_action = current_state.apply_action(action)
             potential_score, _ = self.min_value(potential_action, depth - 1, alpha, beta)
 
@@ -129,7 +134,11 @@ class MyPlayer(PlayerHex):
         current_score: float = float('inf')
         best_action: LightAction | None = None
 
-        for action in current_state.get_possible_light_actions():
+        for heavy_action in current_state.generate_possible_heavy_actions():
+            action = current_state.convert_heavy_action_to_light_action(heavy_action) #light_Action
+            if heavy_action.get_next_game_state().is_done():
+                return (heavy_action.get_next_game_state().get_player_score(self), action)
+            
             potential_action = current_state.apply_action(action)
             potential_score, _ = self.max_value(potential_action, depth - 1, alpha, beta)
 
@@ -227,4 +236,5 @@ class MyPlayer(PlayerHex):
                     distances[neighbor_pos] = dist + cost
                     heapq.heappush(pq, (distances[neighbor_pos], neighbor_pos))
 
+        return distances.get(end_node, float('inf'))
         return distances.get(end_node, float('inf'))
