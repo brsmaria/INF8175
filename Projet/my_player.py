@@ -64,8 +64,6 @@ class MyPlayer(PlayerHex):
             
             if dist_center <= 2:
                 # Adversaire proche du centre → Jouer une réponse "shape"
-                # "lean toward your connection direction"
-                
                 if self.piece_type == "R":  # Rouge connecte HAUT-BAS
                     # Jouer proche du centre, mais vers le HAUT ou BAS
                     row = center - 1  # Légèrement vers le haut
@@ -181,28 +179,29 @@ class MyPlayer(PlayerHex):
 
         distances = { (r, c): float('inf') for r in range(size) for c in range(size) }
         distances[start_node] = 0
+        distances[end_node] = float('inf')
         
         pq = [(0, start_node)]
 
         while pq:
             dist, current_pos = heapq.heappop(pq)
 
+            if current_pos == end_node:
+                return dist
+
             if dist > distances.get(current_pos, float('inf')):
                 continue
-            
-            if current_pos == end_node:
-                return dist # Chemin trouvé
 
-            # Gérer la connexion du nœud de départ aux bords appropriés
+            # Déterminer les voisins
             if current_pos == start_node:
-                if piece_type == "R": # Haut-Bas
+                # Connexion aux cases du bord de départ
+                if piece_type == "R":  # Rouge : bord haut
                     neighbors = [(0, c) for c in range(size)]
-                else: # Gauche-Droite
+                else:  # Bleu : bord gauche
                     neighbors = [(r, 0) for r in range(size)]
             else:
-                # On récupère le dictionnaire des voisins
+                # Voisins normaux sur le plateau
                 raw_neighbors = current_state.get_neighbours(current_pos[0], current_pos[1])
-                # On extrait uniquement les coordonnées des voisins qui sont sur le plateau
                 neighbors = []
                 for neighbor_info in raw_neighbors.values():
                     neighbor_type, neighbor_pos = neighbor_info
@@ -210,31 +209,32 @@ class MyPlayer(PlayerHex):
                         neighbors.append(neighbor_pos)
 
             for neighbor_pos in neighbors:
-                # Coût pour se déplacer vers le voisin
                 cell_content = board.get(neighbor_pos)
-                if cell_content is None: # Case vide
+                if cell_content is None:
                     cost = 1
-                elif cell_content.get_type() == piece_type: # Notre pièce
+                elif cell_content.get_type() == piece_type: 
                     cost = 0
-                else: # Pièce adverse
+                else: 
                     cost = float('inf')
 
-                # Si le voisin est sur le bord d'arrivée, le connecter au nœud final
+                new_distance = dist + cost
+
+                # Vérifier si c'est une case du bord d'arrivée
                 is_end_border = False
                 if piece_type == "R" and neighbor_pos[0] == size - 1:
                     is_end_border = True
                 elif piece_type == "B" and neighbor_pos[1] == size - 1:
                     is_end_border = True
 
+                # Si c'est le bord d'arrivée, connecter au end_node
                 if is_end_border:
-                    if distances[start_node] + cost < distances.get(end_node, float('inf')):
-                        distances[end_node] = distances[start_node] + cost if current_pos == start_node else dist + cost
-                        heapq.heappush(pq, (distances[end_node], end_node))
-                
-                # Mise à jour de la distance normale pour les autres nœuds
-                elif dist + cost < distances.get(neighbor_pos, float('inf')):
-                    distances[neighbor_pos] = dist + cost
-                    heapq.heappush(pq, (distances[neighbor_pos], neighbor_pos))
+                    if new_distance < distances[end_node]:
+                        distances[end_node] = new_distance
+                        heapq.heappush(pq, (new_distance, end_node))
 
-        return distances.get(end_node, float('inf'))
+                if new_distance < distances[neighbor_pos]:
+                    # Mise à jour du coût si un chemin plus court est trouvé
+                    distances[neighbor_pos] = new_distance
+                    heapq.heappush(pq, (new_distance, neighbor_pos))
+
         return distances.get(end_node, float('inf'))
