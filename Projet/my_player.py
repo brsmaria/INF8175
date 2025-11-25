@@ -101,12 +101,26 @@ class MyPlayer(PlayerHex):
         current_score: float = float('-inf')
         best_action: LightAction | None = None
 
+        # Trier les actions pour prioriser celles qui créent des bridges
+        actions_with_priority = []
         for heavy_action in current_state.generate_possible_heavy_actions():
-            action = current_state.convert_heavy_action_to_light_action(heavy_action) #light_Action
+            action = current_state.convert_heavy_action_to_light_action(heavy_action)
+            creates_bridge = self.check_bridge(current_state, action)
+            priority = 0 if creates_bridge else 1  # 0 = haute priorité
+            actions_with_priority.append((priority, heavy_action, action))
+        
+        # Trier par priorité (bridges en premier)
+        actions_with_priority.sort(key=lambda x: x[0])
+
+        for priority, heavy_action, action in actions_with_priority:
             if heavy_action.get_next_game_state().is_done():
                 return (heavy_action.get_next_game_state().get_player_score(self), action)
             potential_action = current_state.apply_action(action)
             potential_score, _ = self.min_value(potential_action, depth - 1, alpha, beta)
+
+            # Bonus pour les bridges
+            if priority == 0:  # C'est un bridge
+                potential_score += 0.5  # Petit bonus
 
             if potential_score > current_score:
                 current_score = potential_score
@@ -163,6 +177,28 @@ class MyPlayer(PlayerHex):
 
         # Un coût plus faible est meilleur. Nous voulons maximiser (opp_cost - my_cost).
         return opponent_path_cost - my_path_cost
+    
+    def check_bridge(self, current_state: GameStateHex, action : LightAction):
+        """
+        Vérifie que la prochaine position créera un bridge 
+        """
+        new_pos = action.data["position"]
+        row, col = new_pos
+
+        board = current_state.get_rep().get_env()
+        neighbors = current_state.get_neighbours(row, col)
+
+        my_pieces_count = 0
+
+        for neighbor_info in neighbors.values():
+            neighbor_type, neighbor_pos = neighbor_info
+            
+            if neighbor_type != "OUTSIDE":
+                cell_content = board.get(neighbor_pos)
+                if cell_content is not None and cell_content.get_type() == self.piece_type:
+                    my_pieces_count += 1
+
+        return my_pieces_count >= 2
 
     def dijkstra_path_cost(self, current_state: GameStateHex, piece_type: str) -> float:
         """
