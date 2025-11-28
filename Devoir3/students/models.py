@@ -1,5 +1,6 @@
 import nn
-from backend import PerceptronDataset, RegressionDataset, DigitClassificationDataset
+from backend import (DigitClassificationDataset, PerceptronDataset,
+                     RegressionDataset)
 
 
 class PerceptronModel(object):
@@ -52,16 +53,39 @@ class PerceptronModel(object):
                     self.w.update(x, nn.as_scalar(y))
                     needToTrain = True
 
+    """
+    on a commencé par des petites valeurs pour les paramètres du modèle
+    On a utilisé: 1 couche cachée avec 10 neurones (1 couche cachée -> modèle à 2 couches)
+    La taille des mini-batch est de 1
+    le taux d'apprentissage est de 0.001 
+
+    Le code des variabes: l: linear - p : prediction - n : neurone 
+    Je ne sais pas comment déterminer le batch_size
+    """
 class RegressionModel(object):
     """
     A neural network model for approximating a function that maps from real
     numbers to real numbers. The network should be sufficiently large to be able
     to approximate sin(x) on the interval [-2pi, 2pi] to reasonable precision.
+    -> Pour approximer la fonction sinus, on a une caractéristique d'entrée (x)
+    et un label de sortie (sin(x))
     """
+    DIMENSION_COUCHE_CACHEE = 20
+    BATCH_SIZE = 10
+    LOSS_THRESHOLD = 0.02
+    LEARNING_RATE = 0.001
 
     def __init__(self) -> None:
         # Initialize your model parameters here
         "*** TODO: COMPLETE HERE FOR QUESTION 2 ***"
+        #Couche cachée 1
+        self.w1 = nn.Parameter(1, self.DIMENSION_COUCHE_CACHEE)
+        self.b1 = nn.Parameter(1, self.DIMENSION_COUCHE_CACHEE)
+
+        #Couche de sortie
+        self.w2 = nn.Parameter(self.DIMENSION_COUCHE_CACHEE, 1)
+        self.b2 = nn.Parameter(1, 1)
+
 
     def run(self, x: nn.Constant) -> nn.Node:
         """
@@ -73,6 +97,16 @@ class RegressionModel(object):
             A node with shape (batch_size x 1) containing predicted y-values
         """
         "*** TODO: COMPLETE HERE FOR QUESTION 2 ***"
+        #Couche cachée 1
+        l1 = nn.Linear(x, self.w1)
+        p1 = nn.AddBias(l1, self.b1)
+        n1 = nn.ReLU(p1)
+
+        #Couche de sortie
+        l2 = nn.Linear(n1, self.w2)
+        p2 = nn.AddBias(l2, self.b2)
+        return p2
+        
 
     def get_loss(self, x: nn.Constant, y: nn.Constant) -> nn.Node:
         """
@@ -85,12 +119,31 @@ class RegressionModel(object):
         Returns: a loss node
         """
         "*** TODO: COMPLETE HERE FOR QUESTION 2 ***"
+        prediction = self.run(x)
+        return nn.SquareLoss(prediction, y)
 
     def train(self, dataset: RegressionDataset) -> None:
         """
         Trains the model.
         """
         "*** TODO: COMPLETE HERE FOR QUESTION 2 ***"
+        loss_value = float('inf')
+        while True:
+            for x, y in dataset.iterate_once(self.BATCH_SIZE):
+                loss_node = self.get_loss(x, y)
+                loss_value = nn.as_scalar(loss_node)
+
+                print("Current loss:", loss_value)
+                if loss_value <= self.LOSS_THRESHOLD:
+                    break
+
+                gradients = nn.gradients(loss_node, [self.w1, self.b1, self.w2, self.b2])
+
+                self.w1.update(gradients[0], -self.LEARNING_RATE)
+                self.b1.update(gradients[1], -self.LEARNING_RATE)
+                self.w2.update(gradients[2], -self.LEARNING_RATE)
+                self.b2.update(gradients[3], -self.LEARNING_RATE)
+
 
 
 class DigitClassificationModel(object):
