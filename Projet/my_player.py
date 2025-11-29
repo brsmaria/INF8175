@@ -20,6 +20,7 @@ class MyPlayer(PlayerHex):
     """
 
     DIRECTIONS = ("top_right", "top_left", "right", "left", "bot_right", "bot_left")
+    next_light_action = LightAction
         
     def __init__(self, piece_type: str, name: str = "MyPlayer"):
         """
@@ -178,12 +179,10 @@ class MyPlayer(PlayerHex):
         best_score: float = -inf
         best_heavy_action: HeavyAction | None = None
 
-        for heavy_action in self._order_actions_finishers_first(
-                current_state,
-                list(current_state.generate_possible_heavy_actions()),
-                self.piece_type):
+        for heavy_action in current_state.generate_possible_heavy_actions():
             if heavy_action.get_next_game_state().is_done():
                 return (heavy_action.get_next_game_state().get_player_score(self), heavy_action)
+            self.next_light_action =  current_state.convert_heavy_action_to_light_action(heavy_action)
             next_state = heavy_action.get_next_game_state()
             score, _ = self.min_value(next_state, depth - 1, alpha, beta)
             if score > best_score:
@@ -203,12 +202,10 @@ class MyPlayer(PlayerHex):
         best_score: float = inf
         best_heavy_action: HeavyAction | None = None
 
-        for heavy_action in self._order_actions_finishers_first(
-                current_state,
-                list(current_state.generate_possible_heavy_actions()),
-                "B" if self.piece_type == "R" else "R"):  # on privilégie les "finishers" de l’adversaire pour les bloquer
+        for heavy_action in current_state.generate_possible_heavy_actions():
             if heavy_action.get_next_game_state().is_done():
                 return (heavy_action.get_next_game_state().get_player_score(self), heavy_action)
+            self.next_light_action =  current_state.convert_heavy_action_to_light_action(heavy_action)
             next_state = heavy_action.get_next_game_state()
             score, _ = self.max_value(next_state, depth - 1, alpha, beta)
             if score < best_score:
@@ -228,20 +225,54 @@ class MyPlayer(PlayerHex):
         my_count  = sum(1 for p in env.values() if p.get_type() == my_piece)
         opp_count = sum(1 for p in env.values() if p.get_type() == opp_piece)
 
-        d_me, test  = self._shannon_path_empty_cells(state, my_piece)
+        d_me, _  = self._shannon_path_empty_cells(state, my_piece)
         d_opp, _ = self._shannon_path_empty_cells(state, opp_piece)
 
         # si pas de chemin (bloqué par murs), traite comme très défavorable/favorable
         if d_me >= 10**9: d_me = 1000
         if d_opp >= 10**9: d_opp = 1000
 
-        if len(test) == 1:
-            print("Only one move to win!")
-            d_me = 0
+        dim = state.get_rep().get_dimensions()[0]   
 
-        print(f"Heuristic eval: my_count={my_count}, opp_count={opp_count}, d_me={d_me}, d_opp={d_opp}")
+        # Is the move creating a bridge
+        bridge_bonus = 0
+        print(self.next_light_action.data)
+        i, j = self.next_light_action.data['position']
 
-        return d_opp - d_me 
+        bridge_offsets = [
+            (-2,  1),
+            (-1,  2),
+            (-1, -1),
+            ( 1, -2),
+            ( 2, -1),
+            ( 1,  1),
+        ]
+
+        for di, dj in bridge_offsets:
+            ni, nj = i + di, j + dj
+            if not self._in_bounds(ni, nj, dim):
+                continue
+            p = state.rep.env.get((ni, nj))
+            if p is not None and p.get_type() == my_piece:
+                # on a une pierre de ma couleur à l'autre extrémité du bridge
+                bridge_bonus += 3  # poids à ajuster selon l'importance que tu donnes au bridge
+        
+        # Is the move blocking the opponent's bridge
+        block_bridge_bonus = 0
+
+        for di, dj in bridge_offsets:
+            ni, nj = i + di, j + dj
+            if not self._in_bounds(ni, nj, dim):
+                continue
+            p = state.rep.env.get((ni, nj))
+            if p is not None and p.get_type() == opp_piece:
+                # si je joue sur une des cases de support d’un potentiel bridge adverse
+                # le coup est très intéressant défensivement
+                block_bridge_bonus += 800000  # un peu moins que ton propre bridge par ex.
+
+        #Is Usless tiangle
+
+        return (d_opp - d_me) + bridge_bonus + block_bridge_bonus
 
 
     
