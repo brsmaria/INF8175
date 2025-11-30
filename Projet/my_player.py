@@ -50,34 +50,17 @@ class MyPlayer(PlayerHex):
         env = current_state.rep.env
         board_size = current_state.rep.get_dimensions()[0]
         center = board_size // 2 - 1
-        
-        if len(env) == 0:
-            # Premier joueur : centre
-            row, col = center, center
-            
-        elif len(env) == 1:
-            # Deuxième joueur
-            opp_row, opp_col = list(env.keys())[0]
-            
-            # Vérifier si adversaire au centre (rayon 2)
-            dist_center = abs(opp_row - center) + abs(opp_col - center)
-            
-            if dist_center <= 2:
-                # Adversaire proche du centre → Jouer une réponse "shape"
-                if self.piece_type == "R":  # Rouge connecte HAUT-BAS
-                    # Jouer proche du centre, mais vers le HAUT ou BAS
-                    row = center - 1  # Légèrement vers le haut
-                    col = center
-                else:  # Bleu connecte GAUCHE-DROITE
-                    # Jouer proche du centre, mais vers la GAUCHE ou DROITE
-                    row = center
-                    col = center - 1  # Légèrement vers la gauche
-            else:
-                # Adversaire loin du centre → Prendre le centre
-                row, col = center, center
-        else:
-            row, col = center, center
-            
+
+        center_positions = [(center, center), (center, center + 1),
+                            (center + 1, center), (center + 1, center + 1)]
+
+        row, col = center_positions[0]  # Default fallback
+
+        for pos in center_positions:
+            if pos not in env:
+                row, col = pos
+                break
+
         return LightAction({"piece": self.piece_type, "position": (row, col)})
 
     def minimax_search(self, current_state: GameState) -> Action:
