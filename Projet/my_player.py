@@ -188,7 +188,7 @@ class MyPlayer(PlayerHex):
         board = current_state.get_rep().get_env()
         neighbors = current_state.get_neighbours(row, col)
 
-        my_pieces_count = 0
+        my_pieces = []
 
         for neighbor_info in neighbors.values():
             neighbor_type, neighbor_pos = neighbor_info
@@ -196,9 +196,23 @@ class MyPlayer(PlayerHex):
             if neighbor_type != "OUTSIDE":
                 cell_content = board.get(neighbor_pos)
                 if cell_content is not None and cell_content.get_type() == self.piece_type:
-                    my_pieces_count += 1
+                    my_pieces.append(neighbor_pos)
 
-        return my_pieces_count >= 2
+        # Il faut exactement 2 pièces alliées pour former un bridge
+        if len(my_pieces) != 2:
+            return False
+
+        pos1, pos2 = my_pieces
+        
+        # Vérifier que les deux pièces ne sont pas adjacentes entre elles
+        neighbors_of_pos1 = current_state.get_neighbours(pos1[0], pos1[1])
+        
+        for neighbor_info in neighbors_of_pos1.values():
+            neighbor_type, neighbor_pos = neighbor_info
+            if neighbor_pos == pos2:
+                return False  # Les deux pièces sont adjacentes, pas un vrai bridge
+
+        return True  # Bridge valide
 
     def dijkstra_path_cost(self, current_state: GameStateHex, piece_type: str) -> float:
         """
