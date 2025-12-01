@@ -30,10 +30,8 @@ class MyPlayer(PlayerHex):
             name (str, optional): Name of the player (default is "bob")
         """
         super().__init__(piece_type, name)
-        self._max_depth = 1
-        self._extension_threshold = 5 # à ajuster après tests
-        self._tt = {}
-        self._shannon_cache = {}
+        self._max_depth = 3
+        self.last_d_me = 14
 
         self.next_light_action: LightAction | None = None
         self.last_opp_action: LightAction | None = None
@@ -137,183 +135,42 @@ class MyPlayer(PlayerHex):
 
         return (best_distance, empties)
 
-    def _order_actions_finishers_first(
-        self,
-        state: GameStateHex,
-        actions: list[HeavyAction],
-        piece: str
-    ) -> list[HeavyAction]:
-        """
-        Filtre les actions :
-          - enlève les triangles (<= 2 voisins vides)
-          - enlève les bridge peeps (ma pierre entre deux pierres adverses)
-          - garde seulement :
-                * les coups dans 'finishers' (chemin de Shannon pour `piece`)
-                * OU ceux qui créent un bridge, bloquent un bridge adverse
-                  ou complètent un bridge pour `piece`.
-
-        Les actions retenues sont ensuite ordonnées :
-          - d'abord celles qui jouent dans 'finishers'
-          - puis les autres coups "intéressants".
-        Si tout est filtré, on renvoie la liste originale pour ne pas tuer la recherche.
-        """
-        dim = state.get_rep().get_dimensions()[0]
-
-        # perspective
-        my_piece  = piece
-        opp_piece = "B" if my_piece == "R" else "R"
-
-        # cases vides d'un chemin minimal pour `piece`
-        _, finishers = self._shannon_path_empty_cells(state, my_piece)
+    def _order_actiosns_finishers_first(
+            self,
+            state: GameStateHex,
+            actions: list[HeavyAction],
+            piece: str
+        ) -> list[HeavyAction]:
 
         if not actions:
             return actions
 
-        # offsets identiques à ceux de ta heuristique
-        bridge_offsets = [
-            (-2,  1),
-            (-1,  2),
-            (-1, -1),
-            ( 1, -2),
-            ( 2, -1),
-            ( 1,  1),
-        ]
-
-        neighbor_offsets = [
-            (-1,  0),
-            (-1,  1),
-            ( 0, -1),
-            ( 0,  1),
-            ( 1, -1),
-            ( 1,  0),
-        ]
-
-        middle_pairs = [
-            ((-1,  0), ( 1, -1)),  # (i-1, j)   et (i+1, j-1)
-            ((-1,  1), ( 1,  0)),  # (i-1, j+1) et (i+1, j)
-            (( 0,  1), ( 0, -1)),  # (i, j+1)   et (i, j-1)
-        ]
-
         before_keys = set(state.rep.env.keys())
 
-        finishers_actions: list[HeavyAction] = []
-        other_good_actions: list[HeavyAction] = []
+        scored_actions = []  # list of (score, heavy_action)
+        action_score = 0
+        for heavy_action in actions:
+            next_state = heavy_action.get_next_game_state()
+            action_score = self.evaluate(next_state, before_keys, piece)
 
-        for ha in actions:
-            ns = ha.get_next_game_state()
-            env_ns = ns.rep.env
-
-            # 1) retrouver la case jouée
-            after_keys = set(env_ns.keys())
-            diff = list(after_keys - before_keys)
-            if not diff:
-                # sécurité, on ne s'attend pas à ça mais on ne crash pas
-                continue
-            i, j = diff[0]
-
-            # 2) filtrer les triangles (<= 2 voisins vides)
-            empty_neighbors = 0
-            for di, dj in neighbor_offsets:
-                ni, nj = i + di, j + dj
-                if not self._in_bounds(ni, nj, dim):
-                    continue
-                if env_ns.get((ni, nj)) is None:
-                    empty_neighbors += 1
-            if empty_neighbors <= 2:
-                # on enlève ce coup : triangle / coup très enfermé
+            # garder seulement coups intéressants
+            if action_score <= 0:
                 continue
 
-            # 3) filtrer les bridge peeps :
-            #    ma pierre au milieu de deux pierres adverses
-            is_bridge_peep = False
-            for (di1, dj1), (di2, dj2) in middle_pairs:
-                ni1, nj1 = i + di1, j + dj1
-                ni2, nj2 = i + di2, j + dj2
+            scored_actions.append((action_score, heavy_action))
 
-                if not (self._in_bounds(ni1, nj1, dim) and self._in_bounds(ni2, nj2, dim)):
-                    continue
+        # si rien de filtré, retourne 10 premiers coups bruts
+        if not scored_actions:
+            return actions[:10]
 
-                p1 = env_ns.get((ni1, nj1))
-                p2 = env_ns.get((ni2, nj2))
+        # --- TRI PAR SCORE DECROISSANT ---
+        scored_actions.sort(key=lambda x: x[0], reverse=True)
 
-                if (
-                    p1 is not None
-                    and p2 is not None
-                    and p1.get_type() == opp_piece
-                    and p2.get_type() == opp_piece
-                ):
-                    is_bridge_peep = True
-                    break
+        # --- GARDER SEULEMENT LES 10 MEILLEURS ---
+        top10 = [ha for (_, ha) in scored_actions[:10]]
 
-            if is_bridge_peep:
-                # on jette les bridge peeps
-                continue
+        return top10
 
-            # 4) calculer les patterns intéressants :
-            #    bridge pour moi, blocage de bridge adverse, complete bridge
-            bridge_bonus = 0
-            block_bridge_bonus = 0
-            complete_bridge_bonus = 0
-
-            # 4a) bridges
-            for di, dj in bridge_offsets:
-                ni, nj = i + di, j + dj
-                if not self._in_bounds(ni, nj, dim):
-                    continue
-                p = env_ns.get((ni, nj))
-                if p is None:
-                    continue
-                t = p.get_type()
-                if t == my_piece:
-                    bridge_bonus += 3
-                elif t == opp_piece:
-                    block_bridge_bonus += 3
-
-            # 4b) complete bridge (pour `my_piece`)
-            for (di1, dj1), (di2, dj2) in middle_pairs:
-                ni1, nj1 = i + di1, j + dj1
-                ni2, nj2 = i + di2, j + dj2
-
-                if not (self._in_bounds(ni1, nj1, dim) and self._in_bounds(ni2, nj2, dim)):
-                    continue
-
-                p1 = env_ns.get((ni1, nj1))
-                p2 = env_ns.get((ni2, nj2))
-
-                if (
-                    p1 is not None
-                    and p2 is not None
-                    and p1.get_type() == my_piece
-                    and p2.get_type() == my_piece
-                ):
-                    complete_bridge_bonus += 6
-
-            # 5) critère de conservation :
-            #    on garde seulement :
-            #      - cases dans finishers
-            #      - OU coups avec x bonus de pattern
-            is_finisher = (i, j) in finishers
-            has_pattern = (
-                bridge_bonus > 0
-                or block_bridge_bonus > 0
-                or complete_bridge_bonus > 0
-            )
-
-            if not is_finisher and not has_pattern:
-                # on enlève les coups "neutres" qui ne font ni finisher ni pattern
-                continue
-
-            # 6) rangement : finishers d'abord, puis le reste
-            if is_finisher:
-                finishers_actions.append(ha)
-            else:
-                other_good_actions.append(ha)
-
-        # Si on a trouvé des coups intéressants, on les renvoie.
-        # Sinon, on retombe sur la liste originale pour ne pas bloquer la recherche.
-        if finishers_actions or other_good_actions:
-            return finishers_actions + other_good_actions
-        return actions
 
 
     def compute_action(self, current_state: GameState, remaining_time: int = 1e9, **kwargs) -> Action:
@@ -326,20 +183,7 @@ class MyPlayer(PlayerHex):
         Returns:
             Action: The best action as determined by minimax.
         """
-        dim = current_state.get_rep().get_dimensions()[0]
-        total_cells = dim * dim
-        filled = len(current_state.rep.env)
-        empties = total_cells - filled
-
-        if empties > total_cells * 0.6:
-            self._max_depth = 1
-        elif empties > total_cells * 0.3:
-            self._max_depth = 3
-        else:
-            self._max_depth = 5
-
-        self._shannon_cache.clear()
-
+        print('------------------------------------------------------------------------------')
         if self.is_opening_move(current_state):
             return self.opening_strategy(current_state)
 
@@ -369,269 +213,253 @@ class MyPlayer(PlayerHex):
             return LightAction({"piece": self.piece_type, "position": (row, col)})
 
     def minimax_search(self, current_state: GameState, alpha: int = -inf, beta: int = inf) -> Action:
-        _, best_heavy_action = self.max_value(current_state, self._max_depth, alpha, beta, can_extend=True)
+        _, best_heavy_action = self.max_value(current_state, self._max_depth, alpha, beta)
         return current_state.convert_heavy_action_to_light_action(best_heavy_action)
 
 
-    def max_value(self, current_state: GameState, depth: int, alpha: int, beta: int, can_extend: bool = False):
-        key = hash(current_state)
-        if key in self._tt:
-            return (self._tt[key], None)
-        # Si la partie est déjà terminée
+    def max_value(self, current_state: GameState, depth: int, alpha: int, beta: int):
         if current_state.is_done():
             return (current_state.get_player_score(self), None)
+        if depth <= 0:
+            return (self.heuristic_evalutation(
+                current_state, set(current_state.rep.env.keys())
+            ), None)
 
-        # -----------------------------
-        # Feuille : profondeur 0
-        # -----------------------------
-        if depth == 0:
-            score = self.heuristic_evalutation(current_state)
-
-            # Extension sélective : si la position est très bonne pour moi
-            if can_extend and score > self._extension_threshold:
-                best_score = -inf
-                best_action = None
-
-                # Je simule MES coups (car max joue ici)
-                actions = self._order_actions_finishers_first(
-                    current_state,
-                    list(current_state.generate_possible_heavy_actions()),
-                    self.piece_type
-                )
-
-                for heavy_action in actions:
-                    next_state = heavy_action.get_next_game_state()
-
-                    if next_state.is_done():
-                        child_score = next_state.get_player_score(self)
-                    else:
-                        # max joue → l'adversaire va répondre (min_value)
-                        self.next_light_action = current_state.convert_heavy_action_to_light_action(heavy_action)
-                        child_score, _ = self.min_value(next_state, 0, alpha, beta, can_extend=False)
-
-                    if child_score > best_score:
-                        best_score = child_score
-                        best_action = heavy_action
-
-                    alpha = max(alpha, best_score)
-                    if beta <= alpha:
-                        break
-
-                return (best_score, best_action)
-
-            # Pas d’extension : heuristique brute
-            return (score, None)
-
-        # -----------------------------
-        # Cas général : profondeur > 0
-        # -----------------------------
         best_score: float = -inf
         best_heavy_action: HeavyAction | None = None
 
-        actions = self._order_actions_finishers_first(
-            current_state,
-            list(current_state.generate_possible_heavy_actions()),
-            self.piece_type
-        )
+        for heavy_action in self._order_actions_finishers_first(
+                current_state,
+                list(current_state.generate_possible_heavy_actions()),
+                self.piece_type):
+            if heavy_action.get_next_game_state().is_done():
+                return (current_state.get_player_score(self), heavy_action)
+            self.next_light_action = current_state.convert_heavy_action_to_light_action(heavy_action)
+            next_state = heavy_action.get_next_game_state()
+            score, _ = self.min_value(next_state, depth - 1, alpha, beta)
+            if score > best_score:
+                best_score = score
+                best_heavy_action = heavy_action
+                alpha = max(alpha, best_score)
+            if beta <= alpha:
+                break
+        return (best_score, best_heavy_action)
+
+    def min_value(self, current_state: GameState, depth: int, alpha: int, beta: int):
+        if current_state.is_done():
+            return (current_state.get_player_score(self), None)
+        # if depth == 0:
+        #     return (self.heuristic_evalutation(
+        #         current_state, set(current_state.rep.env.keys())
+        #     ), None)
+
+        best_score: float = inf
+        best_heavy_action: HeavyAction | None = None
+
+        for heavy_action in self._order_actions_finishers_first(
+                current_state,
+                list(current_state.generate_possible_heavy_actions()),
+                "B" if self.piece_type == "R" else "R"):  # on privilégie les "finishers" de l’adversaire pour les bloquer
+            if heavy_action.get_next_game_state().is_done():
+                return (current_state.get_player_score(self), heavy_action)
+            self.next_light_action = current_state.convert_heavy_action_to_light_action(heavy_action)
+            next_state = heavy_action.get_next_game_state()
+            score, _ = self.max_value(next_state, depth - 1, alpha, beta)
+            if score < best_score:
+                best_score = score
+                best_heavy_action = heavy_action
+                beta = min(beta, best_score)
+            if beta <= alpha:
+                break
+        return (best_score, best_heavy_action)
+
+    def heuristic_evalutation(self, state: GameStateHex, before_keys) -> float:
+        my_piece  = self.piece_type
+        opp_piece = "B" if my_piece == "R" else "R"
+
+        dim = state.get_rep().get_dimensions()[0]
+
+        d_me,  _ = self._shannon_path_empty_cells(state, my_piece)
+        d_opp, _ = self._shannon_path_empty_cells(state, opp_piece)
+
+        if d_me  >= 10**9: d_me  = dim * 5
+        if d_opp >= 10**9: d_opp = dim * 5
+
+        shannon_score = d_opp - d_me          # positif si je suis mieux
+        move_score    = self.evaluate(state, before_keys, my_piece)
+
+        # ★ bonus de fin de partie : on sur-récompense un d_me tout petit
+        endgame_bonus = 0
+        if d_me <= 1:
+            endgame_bonus += 1000    # quasi connecté
+        elif d_me <= 2:
+            endgame_bonus += 300     # très très proche
+        elif d_me <= 3:
+            endgame_bonus += 100
+
+        # ★ et on punit si l’adversaire est sur le point de gagner
+        if d_opp <= 1:
+            endgame_bonus -= 1000
+        elif d_opp <= 2:
+            endgame_bonus -= 300
+        elif d_opp <= 3:
+            endgame_bonus -= 100
+
+        w1 = 0.7  # poids du terme global (Shannon)
+        w2 = 0.3  # poids du terme local (patterns)
+        return w1 * shannon_score + w2 * move_score + endgame_bonus
+
+
+    def _order_actions_finishers_first(
+            self,
+            state: GameStateHex,
+            actions: list[HeavyAction],
+            piece: str
+        ) -> list[HeavyAction]:
+
+        if not actions:
+            return actions
+
+        before_keys = set(state.rep.env.keys())
+
+        scored_actions: list[tuple[float, HeavyAction]] = []
 
         for heavy_action in actions:
             next_state = heavy_action.get_next_game_state()
 
             if next_state.is_done():
-                return (next_state.get_player_score(self), heavy_action)
+                return [heavy_action]
 
-            self.next_light_action = current_state.convert_heavy_action_to_light_action(heavy_action)
+            score = self.evaluate(next_state, before_keys, piece)
 
-            score, _ = self.min_value(next_state, depth - 1, alpha, beta, can_extend=can_extend)
+            # On garde seulement les coups vraiment intéressants
+            if score <= 0:
+                continue
 
-            if score > best_score:
-                best_score = score
-                best_heavy_action = heavy_action
-                alpha = max(alpha, best_score)
+            scored_actions.append((score, heavy_action))
 
-            if beta <= alpha:
-                break
-        self._tt[key] = best_score
-        return (best_score, best_heavy_action)
+        # si rien de filtré, retourne au moins quelques coups bruts
+        if not scored_actions:
+            return actions[:5]
 
+        # tri par score décroissant
+        scored_actions.sort(key=lambda x: x[0], reverse=True)
 
-    def min_value(self, current_state: GameState, depth: int, alpha: int, beta: int, can_extend: bool = False):
-        key = hash(current_state)
-        if key in self._tt:
-            return (self._tt[key], None)
-        # Si la partie est déjà terminée, on renvoie le score final
-        if current_state.is_done():
-            return (current_state.get_player_score(self), None)
-
-        # -----------------------------
-        # Feuille : profondeur 0
-        # -----------------------------
-        if depth == 0:
-            score = self.heuristic_evalutation(current_state)
-
-            # Extension sélective : la position est très mauvaise pour moi,
-            # on regarde si l'adversaire (max) a vraiment une si bonne suite
-            if can_extend and score < -self._extension_threshold:
-                best_score = inf
-
-                # c'est à l'adversaire de jouer ici → on simule ses coups
-                opp_piece = "B" if self.piece_type == "R" else "R"
-                actions = self._order_actions_finishers_first(
-                    current_state,
-                    list(current_state.generate_possible_heavy_actions()),
-                    opp_piece
-                )
-
-                for heavy_action in actions:
-                    if heavy_action.get_next_game_state().is_done():
-                        child_score = heavy_action.get_next_game_state().get_player_score(self)
-                    else:
-                        # on regarde la réponse de "max" à profondeur 0, sans nouvelle extension
-                        self.next_light_action = current_state.convert_heavy_action_to_light_action(heavy_action)
-                        next_state = heavy_action.get_next_game_state()
-                        child_score, _ = self.max_value(next_state, 0, alpha, beta, can_extend=False)
-
-                    if child_score < best_score:
-                        best_score = child_score
-                    beta = min(beta, best_score)
-                    if beta <= alpha:
-                        break
-
-                self._tt[key] = best_score
-                return (best_score, None)
-
-            # pas d’extension : on renvoie simplement l’heuristique
-            return (score, None)
-
-        # -----------------------------
-        # Cas général : profondeur > 0
-        # -----------------------------
-        best_score: float = inf
-        best_heavy_action: HeavyAction | None = None
-
-        opp_piece = "B" if self.piece_type == "R" else "R"
-        for heavy_action in self._order_actions_finishers_first(
-                current_state,
-                list(current_state.generate_possible_heavy_actions()),
-                opp_piece):
-
-            if heavy_action.get_next_game_state().is_done():
-                return (heavy_action.get_next_game_state().get_player_score(self), heavy_action)
-
-            self.next_light_action = current_state.convert_heavy_action_to_light_action(heavy_action)
-            next_state = heavy_action.get_next_game_state()
-            score, _ = self.max_value(next_state, depth - 1, alpha, beta, can_extend=can_extend)
-
-            if score < best_score:
-                best_score = score
-                best_heavy_action = heavy_action
-                beta = min(beta, best_score)
-
-            if beta <= alpha:
-                break
-
-        return (best_score, best_heavy_action)
+        # top 10
+        return [ha for (s, ha) in scored_actions[:10]]
 
 
-
-
-    def heuristic_evalutation(self, state: GameStateHex) -> float:
-        my_piece  = self.piece_type
-        opp_piece = "B" if my_piece == "R" else "R"
-
-        env = state.rep.env
-        dim = state.get_rep().get_dimensions()[0]
-
-        # -------------------------
-        # 1) Termes globaux : Shannon
-        # -------------------------
-        d_me,  empties_me  = self._shannon_path_empty_cells(state, my_piece)
-        d_opp, empties_opp = self._shannon_path_empty_cells(state, opp_piece)
-
-        # clamp pour éviter les infs énormes
-        if d_me  >= 10**9: d_me  = dim * 5
-        if d_opp >= 10**9: d_opp = dim * 5
-
-        # terme de base : positif si je suis mieux placé
-        score = (d_opp - d_me)
-
-        # -------------------------
-        # 2) Termes locaux autour du coup joué
-        # -------------------------
-        if self.next_light_action is None:
-            return score  # sécurité, mais normalement ne devrait pas arriver
-
-        i, j = self.next_light_action.data["position"]
-
-        # a) bonus si on joue dans un des empties de mon chemin Shannon
-        if (i, j) in empties_me:
-            score += 8  # remplir mon propre chemin minimal
-
-        # b) bonus si on joue dans un empty du chemin adverse (on le bloque)
-        if (i, j) in empties_opp:
-            score += 6  # perturber son meilleur chemin
-
-        # offsets utilisés pour les bridges (comme avant)
+    def evaluate(self, next_state: GameState, before_keys, piece: str) -> float:
         bridge_offsets = [
-            (-2,  1),
-            (-1,  2),
-            (-1, -1),
-            ( 1, -2),
-            ( 2, -1),
-            ( 1,  1),
+            ((-2,  1), (-1, 0), (-1, 1)),
+            ((-1,  2), (-1, 1), ( 0, 1)),
+            ((-1, -1), (-1, 0), ( 0,-1)),
+            (( 1, -2), ( 0,-1), ( 1,-1)),
+            (( 2, -1), ( 1,-1), ( 1, 0)),
+            (( 1,  1), ( 0, 1), ( 1, 0)),
         ]
 
-        middle_pairs = [
-            ((-1,  0), ( 1, -1)),  # (i-1, j)   et (i+1, j-1)
-            ((-1,  1), ( 1,  0)),  # (i-1, j+1) et (i+1, j)
-            (( 0,  1), ( 0, -1)),  # (i, j+1)   et (i, j-1)
+        neighbor_offsets = [
+            (-1,  0), (-1,  1),
+            ( 0, -1), ( 0,  1),
+            ( 1, -1), ( 1,  0),
         ]
 
+        middle_pairs_for_bridge = [
+            ((-1,0),(1,-1),(0,-1)),
+            ((-1,1),(1,0),(0,1)),
+            ((-1,0),(0,1),(-1,1)),
+            ((-1,1),(0,-1),(-1,0)),
+            ((1,0),(0,-1),(1,-1)),
+            ((1,-1),(0,1),(1,0)),
+        ]
+
+        dim = next_state.get_rep().get_dimensions()[0]
+        my_piece  = piece
+        opp_piece = "B" if my_piece == "R" else "R"
+        
+        env_ns = next_state.rep.env
+
+        # retrouver la case jouée :
+        after_keys = set(env_ns.keys())
+        diff = list(after_keys - before_keys)
+        if not diff:
+            # sécurité : si on ne trouve pas le coup, on considère neutre
+            return 0.0
+
+        i, j = diff[0]
+        action_score = 0.0
+
+        # triangle filter
+        empty_neighbors = 0
+        opp_neighbors = 0
+        for di, dj in neighbor_offsets:
+            ni, nj = i + di, j + dj
+            if 0 <= ni < dim and 0 <= nj < dim:
+                p = env_ns.get((ni, nj))
+                if p is None:
+                    empty_neighbors += 1
+                elif p.get_type() == opp_piece:
+                    opp_neighbors += 1
+
+        # if empty_neighbors < 2:
+        #     action_score -= 200
+
+        # Malus si on s'expose à trop d'adversaires autour
+        if opp_neighbors >= 3:
+            action_score -= 50
+
+        # bridge / block patterns
         bridge_bonus = 0
-        block_bridge_bonus = 0
+        block_bonus  = 0
         complete_bridge_bonus = 0
 
-        # c) bridges / blocage de bridge
-        for di, dj in bridge_offsets:
-            ni, nj = i + di, j + dj
-            if not self._in_bounds(ni, nj, dim):
-                continue
-            p = env.get((ni, nj))
-            if p is None:
-                continue
-            t = p.get_type()
-            if t == my_piece:
-                bridge_bonus += 3
-            elif t == opp_piece:
-                block_bridge_bonus += 3
-
-        # d) complete bridge pour moi
-        for (di1, dj1), (di2, dj2) in middle_pairs:
+        for (di1, dj1), (di2, dj2), (di3, dj3) in bridge_offsets:
             ni1, nj1 = i + di1, j + dj1
             ni2, nj2 = i + di2, j + dj2
+            ni3, nj3 = i + di3, j + dj3
 
-            if not (self._in_bounds(ni1, nj1, dim) and self._in_bounds(ni2, nj2, dim)):
+            if 0 <= ni1 < dim and 0 <= nj1 < dim:
+                p1 = env_ns.get((ni1, nj1))
+                p2 = env_ns.get((ni2, nj2))
+                p3 = env_ns.get((ni3, nj3))
+
+                if p1 and (p2 is None) and (p3 is None):
+                    if p1.get_type() == my_piece:
+                        bridge_bonus += 25
+                    elif p1.get_type() == opp_piece:
+                        block_bonus += 15
+                    break
+
+        for (di1,dj1),(di2,dj2),(di3,dj3) in middle_pairs_for_bridge:
+            ni1, nj1 = i + di1, j + dj1
+            ni2, nj2 = i + di2, j + dj2
+            ni3, nj3 = i + di3, j + dj3
+
+            if not (0 <= ni1 < dim and 0 <= nj1 < dim and
+                    0 <= ni2 < dim and 0 <= nj2 < dim):
                 continue
 
-            p1 = env.get((ni1, nj1))
-            p2 = env.get((ni2, nj2))
+            p1 = env_ns.get((ni1, nj1))
+            p2 = env_ns.get((ni2, nj2))
+            p3 = env_ns.get((ni3, nj3))
 
-            if (
-                p1 is not None
-                and p2 is not None
-                and p1.get_type() == my_piece
-                and p2.get_type() == my_piece
-            ):
-                complete_bridge_bonus += 6
+            # bridge à moi
+            if p1 and p2 and p1.get_type()==my_piece and p2.get_type()==my_piece:
+                if p3 is None:
+                    complete_bridge_bonus += 25
+                elif p3.get_type() == opp_piece:
+                    complete_bridge_bonus += 10000  # URGENT à défendre / exploiter
 
-        # on ajoute les patterns comme des “micro-termes”, pas comme des hard filters
-        score += bridge_bonus
-        score += block_bridge_bonus
-        score += complete_bridge_bonus
+            # bridge adverse
+            if p1 and p2 and p1.get_type()== opp_piece and p2.get_type()==opp_piece:
+                if p3 is None or p3.get_type() == opp_piece:
+                    complete_bridge_bonus -= 10000  # très dangereux
+                elif p3.get_type() == my_piece:
+                    complete_bridge_bonus  += 25  # bon coup de blocage
 
-        return score
-
-
-
-
-    
+        action_score += bridge_bonus + block_bonus + complete_bridge_bonus
+        
+        print(f'next move {i} {j}')
+        print(action_score)
+        return action_score
