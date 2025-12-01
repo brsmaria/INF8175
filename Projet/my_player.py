@@ -20,8 +20,7 @@ class MyPlayer(PlayerHex):
     """
 
     DIRECTIONS = ("top_right", "top_left", "right", "left", "bot_right", "bot_left")
-    next_light_action = LightAction
-        
+
     def __init__(self, piece_type: str, name: str = "MyPlayer"):
         """
         Initialize the PlayerHex instance.
@@ -32,7 +31,13 @@ class MyPlayer(PlayerHex):
         """
         super().__init__(piece_type, name)
         self._max_depth = 1
-        self._extension_threshold = 3  # à ajuster après tests
+        self._extension_threshold = 5 # à ajuster après tests
+        self._tt = {}
+        self._shannon_cache = {}
+
+        self.next_light_action: LightAction | None = None
+        self.last_opp_action: LightAction | None = None
+        self.last_game_state: GameStateHex | None = None
 
 
     def _in_bounds(self, i: int, j: int, dim: int) -> bool:
@@ -132,29 +137,184 @@ class MyPlayer(PlayerHex):
 
         return (best_distance, empties)
 
-    def _order_actions_finishers_first(self, state: GameStateHex, actions: list[HeavyAction], piece: str) -> list[HeavyAction]:
+    def _order_actions_finishers_first(
+        self,
+        state: GameStateHex,
+        actions: list[HeavyAction],
+        piece: str
+    ) -> list[HeavyAction]:
         """
-        Trie les actions en plaçant d’abord celles qui jouent sur une case vide
-        d’un chemin minimal (Shannon) pour le joueur `piece`.
-        """
-        _, finishers = self._shannon_path_empty_cells(state, piece)
-        if not finishers:
-            return actions  # rien de spécial à privilégier
+        Filtre les actions :
+          - enlève les triangles (<= 2 voisins vides)
+          - enlève les bridge peeps (ma pierre entre deux pierres adverses)
+          - garde seulement :
+                * les coups dans 'finishers' (chemin de Shannon pour `piece`)
+                * OU ceux qui créent un bridge, bloquent un bridge adverse
+                  ou complètent un bridge pour `piece`.
 
-        ordered = []
-        tail = []
+        Les actions retenues sont ensuite ordonnées :
+          - d'abord celles qui jouent dans 'finishers'
+          - puis les autres coups "intéressants".
+        Si tout est filtré, on renvoie la liste originale pour ne pas tuer la recherche.
+        """
+        dim = state.get_rep().get_dimensions()[0]
+
+        # perspective
+        my_piece  = piece
+        opp_piece = "B" if my_piece == "R" else "R"
+
+        # cases vides d'un chemin minimal pour `piece`
+        _, finishers = self._shannon_path_empty_cells(state, my_piece)
+
+        if not actions:
+            return actions
+
+        # offsets identiques à ceux de ta heuristique
+        bridge_offsets = [
+            (-2,  1),
+            (-1,  2),
+            (-1, -1),
+            ( 1, -2),
+            ( 2, -1),
+            ( 1,  1),
+        ]
+
+        neighbor_offsets = [
+            (-1,  0),
+            (-1,  1),
+            ( 0, -1),
+            ( 0,  1),
+            ( 1, -1),
+            ( 1,  0),
+        ]
+
+        middle_pairs = [
+            ((-1,  0), ( 1, -1)),  # (i-1, j)   et (i+1, j-1)
+            ((-1,  1), ( 1,  0)),  # (i-1, j+1) et (i+1, j)
+            (( 0,  1), ( 0, -1)),  # (i, j+1)   et (i, j-1)
+        ]
+
+        before_keys = set(state.rep.env.keys())
+
+        finishers_actions: list[HeavyAction] = []
+        other_good_actions: list[HeavyAction] = []
+
         for ha in actions:
             ns = ha.get_next_game_state()
-            # détecter la case jouée: différence entre env avant/après (une seule case en plus)
-            # (robuste si l’API n’expose pas directement la coord du coup)
-            before = set(state.rep.env.keys())
-            after = set(ns.rep.env.keys())
-            placed = list(after - before)
-            if placed and placed[0] in finishers:
-                ordered.append(ha)
+            env_ns = ns.rep.env
+
+            # 1) retrouver la case jouée
+            after_keys = set(env_ns.keys())
+            diff = list(after_keys - before_keys)
+            if not diff:
+                # sécurité, on ne s'attend pas à ça mais on ne crash pas
+                continue
+            i, j = diff[0]
+
+            # 2) filtrer les triangles (<= 2 voisins vides)
+            empty_neighbors = 0
+            for di, dj in neighbor_offsets:
+                ni, nj = i + di, j + dj
+                if not self._in_bounds(ni, nj, dim):
+                    continue
+                if env_ns.get((ni, nj)) is None:
+                    empty_neighbors += 1
+            if empty_neighbors <= 2:
+                # on enlève ce coup : triangle / coup très enfermé
+                continue
+
+            # 3) filtrer les bridge peeps :
+            #    ma pierre au milieu de deux pierres adverses
+            is_bridge_peep = False
+            for (di1, dj1), (di2, dj2) in middle_pairs:
+                ni1, nj1 = i + di1, j + dj1
+                ni2, nj2 = i + di2, j + dj2
+
+                if not (self._in_bounds(ni1, nj1, dim) and self._in_bounds(ni2, nj2, dim)):
+                    continue
+
+                p1 = env_ns.get((ni1, nj1))
+                p2 = env_ns.get((ni2, nj2))
+
+                if (
+                    p1 is not None
+                    and p2 is not None
+                    and p1.get_type() == opp_piece
+                    and p2.get_type() == opp_piece
+                ):
+                    is_bridge_peep = True
+                    break
+
+            if is_bridge_peep:
+                # on jette les bridge peeps
+                continue
+
+            # 4) calculer les patterns intéressants :
+            #    bridge pour moi, blocage de bridge adverse, complete bridge
+            bridge_bonus = 0
+            block_bridge_bonus = 0
+            complete_bridge_bonus = 0
+
+            # 4a) bridges
+            for di, dj in bridge_offsets:
+                ni, nj = i + di, j + dj
+                if not self._in_bounds(ni, nj, dim):
+                    continue
+                p = env_ns.get((ni, nj))
+                if p is None:
+                    continue
+                t = p.get_type()
+                if t == my_piece:
+                    bridge_bonus += 3
+                elif t == opp_piece:
+                    block_bridge_bonus += 3
+
+            # 4b) complete bridge (pour `my_piece`)
+            for (di1, dj1), (di2, dj2) in middle_pairs:
+                ni1, nj1 = i + di1, j + dj1
+                ni2, nj2 = i + di2, j + dj2
+
+                if not (self._in_bounds(ni1, nj1, dim) and self._in_bounds(ni2, nj2, dim)):
+                    continue
+
+                p1 = env_ns.get((ni1, nj1))
+                p2 = env_ns.get((ni2, nj2))
+
+                if (
+                    p1 is not None
+                    and p2 is not None
+                    and p1.get_type() == my_piece
+                    and p2.get_type() == my_piece
+                ):
+                    complete_bridge_bonus += 6
+
+            # 5) critère de conservation :
+            #    on garde seulement :
+            #      - cases dans finishers
+            #      - OU coups avec x bonus de pattern
+            is_finisher = (i, j) in finishers
+            has_pattern = (
+                bridge_bonus > 0
+                or block_bridge_bonus > 0
+                or complete_bridge_bonus > 0
+            )
+
+            if not is_finisher and not has_pattern:
+                # on enlève les coups "neutres" qui ne font ni finisher ni pattern
+                continue
+
+            # 6) rangement : finishers d'abord, puis le reste
+            if is_finisher:
+                finishers_actions.append(ha)
             else:
-                tail.append(ha)
-        return ordered + tail
+                other_good_actions.append(ha)
+
+        # Si on a trouvé des coups intéressants, on les renvoie.
+        # Sinon, on retombe sur la liste originale pour ne pas bloquer la recherche.
+        if finishers_actions or other_good_actions:
+            return finishers_actions + other_good_actions
+        return actions
+
 
     def compute_action(self, current_state: GameState, remaining_time: int = 1e9, **kwargs) -> Action:
         """
@@ -166,7 +326,47 @@ class MyPlayer(PlayerHex):
         Returns:
             Action: The best action as determined by minimax.
         """
+        dim = current_state.get_rep().get_dimensions()[0]
+        total_cells = dim * dim
+        filled = len(current_state.rep.env)
+        empties = total_cells - filled
+
+        if empties > total_cells * 0.6:
+            self._max_depth = 1
+        elif empties > total_cells * 0.3:
+            self._max_depth = 3
+        else:
+            self._max_depth = 5
+
+        self._shannon_cache.clear()
+
+        if self.is_opening_move(current_state):
+            return self.opening_strategy(current_state)
+
         return self.minimax_search(current_state)
+    
+    def is_opening_move(self, current_state: GameStateHex) -> bool:
+        env = current_state.rep.env
+        num_pieces = len(env)
+        return num_pieces <= 1
+    
+    def opening_strategy(self, current_state: GameStateHex) -> LightAction:
+            """Stratégie d'ouverture pour Hex"""
+            env = current_state.rep.env
+            board_size = current_state.rep.get_dimensions()[0]
+            center = board_size // 2 - 1
+
+            center_positions = [(center, center), (center, center + 1),
+                                (center + 1, center), (center + 1, center + 1)]
+
+            row, col = center_positions[0]  # Default fallback
+
+            for pos in center_positions:
+                if pos not in env:
+                    row, col = pos
+                    break
+
+            return LightAction({"piece": self.piece_type, "position": (row, col)})
 
     def minimax_search(self, current_state: GameState, alpha: int = -inf, beta: int = inf) -> Action:
         _, best_heavy_action = self.max_value(current_state, self._max_depth, alpha, beta, can_extend=True)
@@ -174,6 +374,9 @@ class MyPlayer(PlayerHex):
 
 
     def max_value(self, current_state: GameState, depth: int, alpha: int, beta: int, can_extend: bool = False):
+        key = hash(current_state)
+        if key in self._tt:
+            return (self._tt[key], None)
         # Si la partie est déjà terminée
         if current_state.is_done():
             return (current_state.get_player_score(self), None)
@@ -248,13 +451,14 @@ class MyPlayer(PlayerHex):
 
             if beta <= alpha:
                 break
-
-        return (best_score, best_heavy_action)
-
+        self._tt[key] = best_score
         return (best_score, best_heavy_action)
 
 
     def min_value(self, current_state: GameState, depth: int, alpha: int, beta: int, can_extend: bool = False):
+        key = hash(current_state)
+        if key in self._tt:
+            return (self._tt[key], None)
         # Si la partie est déjà terminée, on renvoie le score final
         if current_state.is_done():
             return (current_state.get_player_score(self), None)
@@ -293,6 +497,7 @@ class MyPlayer(PlayerHex):
                     if beta <= alpha:
                         break
 
+                self._tt[key] = best_score
                 return (best_score, None)
 
             # pas d’extension : on renvoie simplement l’heuristique
@@ -335,18 +540,38 @@ class MyPlayer(PlayerHex):
         opp_piece = "B" if my_piece == "R" else "R"
 
         env = state.rep.env
-
-        d_me, _  = self._shannon_path_empty_cells(state, my_piece)
-        d_opp, _ = self._shannon_path_empty_cells(state, opp_piece)
-
-        if d_me >= 10**9: d_me = 1000
-        if d_opp >= 10**9: d_opp = 1000
-
         dim = state.get_rep().get_dimensions()[0]
 
-        # coup joué
+        # -------------------------
+        # 1) Termes globaux : Shannon
+        # -------------------------
+        d_me,  empties_me  = self._shannon_path_empty_cells(state, my_piece)
+        d_opp, empties_opp = self._shannon_path_empty_cells(state, opp_piece)
+
+        # clamp pour éviter les infs énormes
+        if d_me  >= 10**9: d_me  = dim * 5
+        if d_opp >= 10**9: d_opp = dim * 5
+
+        # terme de base : positif si je suis mieux placé
+        score = (d_opp - d_me)
+
+        # -------------------------
+        # 2) Termes locaux autour du coup joué
+        # -------------------------
+        if self.next_light_action is None:
+            return score  # sécurité, mais normalement ne devrait pas arriver
+
         i, j = self.next_light_action.data["position"]
 
+        # a) bonus si on joue dans un des empties de mon chemin Shannon
+        if (i, j) in empties_me:
+            score += 8  # remplir mon propre chemin minimal
+
+        # b) bonus si on joue dans un empty du chemin adverse (on le bloque)
+        if (i, j) in empties_opp:
+            score += 6  # perturber son meilleur chemin
+
+        # offsets utilisés pour les bridges (comme avant)
         bridge_offsets = [
             (-2,  1),
             (-1,  2),
@@ -356,34 +581,31 @@ class MyPlayer(PlayerHex):
             ( 1,  1),
         ]
 
-        # 1) Bridge pour moi
-        bridge_bonus = 0
-        for di, dj in bridge_offsets:
-            ni, nj = i + di, j + dj
-            if not self._in_bounds(ni, nj, dim):
-                continue
-            p = state.rep.env.get((ni, nj))
-            if p is not None and p.get_type() == my_piece:
-                bridge_bonus += 3
-
-        # 2) Bridge adverse bloqué
-        block_bridge_bonus = 0
-        for di, dj in bridge_offsets:
-            ni, nj = i + di, j + dj
-            if not self._in_bounds(ni, nj, dim):
-                continue
-            p = state.rep.env.get((ni, nj))
-            if p is not None and p.get_type() == opp_piece:
-                block_bridge_bonus += 3 
-
-        # 3) Complete bridge : la pierre ajoutée est entre deux pierres de même couleur
-        complete_bridge_bonus = 0
         middle_pairs = [
             ((-1,  0), ( 1, -1)),  # (i-1, j)   et (i+1, j-1)
             ((-1,  1), ( 1,  0)),  # (i-1, j+1) et (i+1, j)
             (( 0,  1), ( 0, -1)),  # (i, j+1)   et (i, j-1)
         ]
 
+        bridge_bonus = 0
+        block_bridge_bonus = 0
+        complete_bridge_bonus = 0
+
+        # c) bridges / blocage de bridge
+        for di, dj in bridge_offsets:
+            ni, nj = i + di, j + dj
+            if not self._in_bounds(ni, nj, dim):
+                continue
+            p = env.get((ni, nj))
+            if p is None:
+                continue
+            t = p.get_type()
+            if t == my_piece:
+                bridge_bonus += 3
+            elif t == opp_piece:
+                block_bridge_bonus += 3
+
+        # d) complete bridge pour moi
         for (di1, dj1), (di2, dj2) in middle_pairs:
             ni1, nj1 = i + di1, j + dj1
             ni2, nj2 = i + di2, j + dj2
@@ -391,8 +613,8 @@ class MyPlayer(PlayerHex):
             if not (self._in_bounds(ni1, nj1, dim) and self._in_bounds(ni2, nj2, dim)):
                 continue
 
-            p1 = state.rep.env.get((ni1, nj1))
-            p2 = state.rep.env.get((ni2, nj2))
+            p1 = env.get((ni1, nj1))
+            p2 = env.get((ni2, nj2))
 
             if (
                 p1 is not None
@@ -400,43 +622,15 @@ class MyPlayer(PlayerHex):
                 and p1.get_type() == my_piece
                 and p2.get_type() == my_piece
             ):
-                complete_bridge_bonus += 4  # plus fort qu’un simple bridge
+                complete_bridge_bonus += 6
 
-        # 4) Useless triangle : la pierre jouée n’a plus que 2 cases vides adjacentes
-        useless_triangle_malus = 0
-        empty_neighbors = 0
+        # on ajoute les patterns comme des “micro-termes”, pas comme des hard filters
+        score += bridge_bonus
+        score += block_bridge_bonus
+        score += complete_bridge_bonus
 
-        # voisins hex standard dans ta représentation (i, j)
-        neighbor_offsets = [
-            (-1,  0),
-            (-1,  1),
-            ( 0, -1),
-            ( 0,  1),
-            ( 1, -1),
-            ( 1,  0),
-        ]
+        return score
 
-        for di, dj in neighbor_offsets:
-            ni, nj = i + di, j + dj
-            if not self._in_bounds(ni, nj, dim):
-                continue
-            if state.rep.env.get((ni, nj)) is None:
-                empty_neighbors += 1
-
-        if empty_neighbors == 2:
-            # coup très enfermé, généralement une forme « triangle » qui n’aide pas la connexion
-            useless_triangle_malus -= 100
-
-        raw_score = (
-            0.1 * (d_opp - d_me)
-            + bridge_bonus
-            + block_bridge_bonus
-            + complete_bridge_bonus
-            + useless_triangle_malus
-        )
-
-        print(raw_score)
-        return raw_score
 
 
 
