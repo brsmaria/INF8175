@@ -294,10 +294,17 @@ class MyPlayer(PlayerHex):
         if d_opp >= 10**9: d_opp = dim * 5
 
         shannon_score = d_opp - d_me          # positif si je suis mieux
+
+        if d_me < self.last_d_me :
+            shannon_score += 50
+            self.last_d_me = d_me
         move_score    = self.evaluate(state, before_keys, my_piece)
 
-        if d_me <=2: 
+        if d_me <=3: 
+            shannon_score += 50
             self.end_game = True
+        else:
+            self.end_game = False
 
         w1 = 0.7  # poids du terme global (Shannon)
         w2 = 0.3  # poids du terme local (patterns)
@@ -368,10 +375,22 @@ class MyPlayer(PlayerHex):
             ((1,-1),(0,1),(1,0)),
         ]
 
+        useless_flower_offset_R = [
+            ((-1, -1), (0,-2), (1, -2)),
+            ((-1, 2), (0, 2), (1, 1)),
+        ]
+
+        useless_flower_offset_B = [
+            ((-2, 0), (-2, 1), (-2, 2)),
+            ((2, -2), (2, -1), (2, 0)),
+        ]
+
+
         dim = next_state.get_rep().get_dimensions()[0]
         my_piece  = piece
         opp_piece = "B" if my_piece == "R" else "R"
         
+        useless_flower_offset = useless_flower_offset_R if my_piece == "R" else useless_flower_offset_B
         env_ns = next_state.rep.env
 
         # retrouver la case jouée :
@@ -403,6 +422,17 @@ class MyPlayer(PlayerHex):
         if opp_neighbors >= 3:
             action_score -= 50
 
+        # useless flower
+        for side in useless_flower_offset:
+            useless_flower_count = 0
+            for di, dj in side:
+                ni, nj = i + di, j + dj
+                if 0 <= ni < dim and 0 <= nj < dim:
+                    p = env_ns.get((ni, nj))
+                    if p and p.get_type() == my_piece:
+                        useless_flower_count +=1
+            if useless_flower_count >= 2:
+                action_score -=20
 
         # bridge / block patterns
         bridge_bonus = 0
