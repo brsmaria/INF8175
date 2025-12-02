@@ -36,6 +36,7 @@ class MyPlayer(PlayerHex):
         self.next_light_action: LightAction | None = None
         self.last_opp_action: LightAction | None = None
         self.last_game_state: GameStateHex | None = None
+        self.empties
 
 
     def _in_bounds(self, i: int, j: int, dim: int) -> bool:
@@ -282,32 +283,17 @@ class MyPlayer(PlayerHex):
         d_me,  _ = self._shannon_path_empty_cells(state, my_piece)
         d_opp, _ = self._shannon_path_empty_cells(state, opp_piece)
 
+        print(empties)
+
         if d_me  >= 10**9: d_me  = dim * 5
         if d_opp >= 10**9: d_opp = dim * 5
 
         shannon_score = d_opp - d_me          # positif si je suis mieux
         move_score    = self.evaluate(state, before_keys, my_piece)
 
-        # ★ bonus de fin de partie : on sur-récompense un d_me tout petit
-        endgame_bonus = 0
-        if d_me <= 1:
-            endgame_bonus += 1000    # quasi connecté
-        elif d_me <= 2:
-            endgame_bonus += 300     # très très proche
-        elif d_me <= 3:
-            endgame_bonus += 100
-
-        # ★ et on punit si l’adversaire est sur le point de gagner
-        if d_opp <= 1:
-            endgame_bonus -= 1000
-        elif d_opp <= 2:
-            endgame_bonus -= 300
-        elif d_opp <= 3:
-            endgame_bonus -= 100
-
         w1 = 0.7  # poids du terme global (Shannon)
         w2 = 0.3  # poids du terme local (patterns)
-        return w1 * shannon_score + w2 * move_score + endgame_bonus
+        return w1 * shannon_score + w2 * move_score
 
 
     def _order_actions_finishers_first(
@@ -402,8 +388,8 @@ class MyPlayer(PlayerHex):
                 elif p.get_type() == opp_piece:
                     opp_neighbors += 1
 
-        # if empty_neighbors < 2:
-        #     action_score -= 200
+        if empty_neighbors < 2:
+            action_score -= 50
 
         # Malus si on s'expose à trop d'adversaires autour
         if opp_neighbors >= 3:
@@ -449,12 +435,12 @@ class MyPlayer(PlayerHex):
                 if p3 is None:
                     complete_bridge_bonus += 25
                 elif p3.get_type() == opp_piece:
-                    complete_bridge_bonus += 10000  # URGENT à défendre / exploiter
+                    complete_bridge_bonus += 40  # URGENT à défendre / exploiter
 
             # bridge adverse
             if p1 and p2 and p1.get_type()== opp_piece and p2.get_type()==opp_piece:
                 if p3 is None or p3.get_type() == opp_piece:
-                    complete_bridge_bonus -= 10000  # très dangereux
+                    complete_bridge_bonus -= 40  # très dangereux
                 elif p3.get_type() == my_piece:
                     complete_bridge_bonus  += 25  # bon coup de blocage
 
