@@ -32,11 +32,12 @@ class MyPlayer(PlayerHex):
         super().__init__(piece_type, name)
         self._max_depth = 3
         self.last_d_me = 14
+        self.end_game = False
 
         self.next_light_action: LightAction | None = None
         self.last_opp_action: LightAction | None = None
         self.last_game_state: GameStateHex | None = None
-        self.empties
+        
 
 
     def _in_bounds(self, i: int, j: int, dim: int) -> bool:
@@ -66,7 +67,7 @@ class MyPlayer(PlayerHex):
             targets = [(i, dim - 1) for i in range(dim)]
         return sources, targets
 
-    def _shannon_path_empty_cells(self, state: GameStateHex, piece: str) -> tuple[int, set[tuple[int, int]]]:
+    def _shannon_path_with_path(self, state: GameStateHex, piece: str) -> tuple[int, set[tuple[int, int]]]:
         """
         0–1 BFS (coût 0 sur 'piece', 1 sur vides, inf sur adversaire).
         Retourne (distance minimale, ensemble des cases vides appartenant à UN chemin minimal).
@@ -134,7 +135,11 @@ class MyPlayer(PlayerHex):
             if state.rep.env.get((i, j)) is None:
                 empties.add((i, j))
 
-        return (best_distance, empties)
+        return (best_distance, empties, path)
+    
+    def _shannon_path_empty_cells(self, state: GameStateHex, piece: str) -> tuple[int, set[tuple[int, int]]]:
+        d, empties, _ = self._shannon_path_with_path(state, piece)
+        return d, empties
 
     def _order_actiosns_finishers_first(
             self,
@@ -187,6 +192,8 @@ class MyPlayer(PlayerHex):
         print('------------------------------------------------------------------------------')
         if self.is_opening_move(current_state):
             return self.opening_strategy(current_state)
+        elif self.end_game:
+            return self.end_game_strategy(current_state)
 
         return self.minimax_search(current_state)
     
@@ -283,13 +290,14 @@ class MyPlayer(PlayerHex):
         d_me,  _ = self._shannon_path_empty_cells(state, my_piece)
         d_opp, _ = self._shannon_path_empty_cells(state, opp_piece)
 
-        print(empties)
-
         if d_me  >= 10**9: d_me  = dim * 5
         if d_opp >= 10**9: d_opp = dim * 5
 
         shannon_score = d_opp - d_me          # positif si je suis mieux
         move_score    = self.evaluate(state, before_keys, my_piece)
+
+        if d_me <=2: 
+            self.end_game = True
 
         w1 = 0.7  # poids du terme global (Shannon)
         w2 = 0.3  # poids du terme local (patterns)
@@ -395,6 +403,7 @@ class MyPlayer(PlayerHex):
         if opp_neighbors >= 3:
             action_score -= 50
 
+
         # bridge / block patterns
         bridge_bonus = 0
         block_bonus  = 0
@@ -416,6 +425,14 @@ class MyPlayer(PlayerHex):
                     elif p1.get_type() == opp_piece:
                         block_bonus += 15
                     break
+                elif p1 and p2 and (p3 is None ):
+                    if p1.get_type() == my_piece and p2.get_type() == opp_piece:
+                        block_bonus -= 20
+
+                elif p1 and p3 and (p2 is None ):
+                    if p1.get_type() == my_piece and p3.get_type() == opp_piece:
+                        block_bonus -= 20
+                
 
         for (di1,dj1),(di2,dj2),(di3,dj3) in middle_pairs_for_bridge:
             ni1, nj1 = i + di1, j + dj1
@@ -435,7 +452,7 @@ class MyPlayer(PlayerHex):
                 if p3 is None:
                     complete_bridge_bonus += 25
                 elif p3.get_type() == opp_piece:
-                    complete_bridge_bonus += 40  # URGENT à défendre / exploiter
+                    complete_bridge_bonus += 50  # URGENT à défendre / exploiter
 
             # bridge adverse
             if p1 and p2 and p1.get_type()== opp_piece and p2.get_type()==opp_piece:
@@ -449,3 +466,138 @@ class MyPlayer(PlayerHex):
         print(f'next move {i} {j}')
         print(action_score)
         return action_score
+
+    def end_game_strategy(self, current_state: GameStateHex) -> LightAction:
+        """
+        Stratégie de fin de partie :
+        - parcourt tous les coups possibles
+        - évalue pour chacun :
+            * la distance de Shannon (d_me, d_opp)
+            * les patterns locaux (bridges, blocages) via evaluate
+        - choisit le coup avec le meilleur score.
+        """
+
+        my_piece  = self.piece_type
+        opp_piece = "B" if my_piece == "R" else "R"
+        dim       = current_state.get_rep().get_dimensions()[0]
+
+        env = current_state.rep.env
+
+        total_cells       = dim * dim
+        remaining_empties = total_cells - len(env)
+        print(f"[ENDGAME] Cases vides restantes : {remaining_empties}")
+
+        before_keys = set(env.keys())
+
+        best_score: float = -inf
+        best_heavy_action: HeavyAction | None = None
+
+        for heavy_action in current_state.generate_possible_heavy_actions():
+            next_state = heavy_action.get_next_game_state()
+
+            if next_state.is_done():
+                print("[ENDGAME] Coup gagnant trouvé.")
+                return current_state.convert_heavy_action_to_light_action(heavy_action)
+
+            d_me,  _, my_path  = self._shannon_path_with_path(next_state, my_piece)
+            d_opp, _, opp_path = self._shannon_path_with_path(next_state, opp_piece)
+
+            if d_me  >= 10**9: d_me  = dim * 5
+            if d_opp >= 10**9: d_opp = dim * 5
+
+            shannon_score = d_opp - d_me   # > 0 si on est mieux
+
+            local_score = self.evaluate(next_state, before_keys, my_piece)
+
+            # >>>>> NOUVEAU : bonus de bridge autour de my_path[-1]
+            bridge_last_path_bonus = self._bridge_bonus_last_path(
+                next_state,
+                before_keys,
+                my_piece,
+                my_path
+            )
+
+            w_shannon = 1.0
+            w_local   = 0.4
+
+            total_score = (
+                w_shannon * shannon_score +
+                w_local   * local_score +
+                bridge_last_path_bonus
+            )
+
+            print("[ENDGAME] coup testé, score =", total_score)
+
+            if total_score > best_score:
+                best_score = total_score
+                best_heavy_action = heavy_action
+
+        if best_heavy_action is None:
+            print("[ENDGAME] Aucun coup choisi, fallback minimax.")
+            _, best_heavy_action = self.max_value(current_state, 1, -inf, inf)
+
+        return current_state.convert_heavy_action_to_light_action(best_heavy_action)
+
+
+
+    def _bridge_bonus_last_path(
+        self,
+        next_state: GameStateHex,
+        before_keys: set[tuple[int, int]],
+        my_piece: str,
+        my_path: list[tuple[int, int]]
+    ) -> float:
+        """
+        Donne un bonus si le coup joué :
+        - forme un bridge avec la dernière case du chemin my_path[-1]
+        - et éventuellement 'complète' un bridge formé par my_path[-1] avec une autre de mes pierres du chemin.
+        """
+
+        if not my_path:
+            return 0.0
+
+        env_ns = next_state.rep.env
+        after_keys = set(env_ns.keys())
+        diff = list(after_keys - before_keys)
+        if not diff:
+            return 0.0
+
+        # case jouée par ce HeavyAction
+        i, j = diff[0]
+
+        pivot_i, pivot_j = my_path[-1]
+
+        # vecteurs de bridge (distance entre deux extrémités de bridge)
+        bridge_vectors = [
+            (-2,  1), (-1,  2),
+            (-1, -1), ( 1,  1),
+            ( 1, -2), ( 2, -1),
+        ]
+
+        # 1) Bonus si la case jouée est en relation de bridge avec my_path[-1]
+        di = pivot_i - i
+        dj = pivot_j - j
+
+        bonus = 0.0
+
+        pivot_p = env_ns.get((pivot_i, pivot_j))
+        played_p = env_ns.get((i, j))
+
+        if (di, dj) in bridge_vectors and pivot_p and played_p:
+            if pivot_p.get_type() == my_piece and played_p.get_type() == my_piece:
+                # bridge direct entre le coup et my_path[-1]
+                bonus += 30.0  # à ajuster selon l'impact souhaité
+
+                # 2) Bonus supplémentaire si my_path[-1] forme aussi un bridge avec
+                #    une autre de mes pierres sur le chemin -> on interprète ça
+                #    comme "compléter" un pattern autour de my_path[-1].
+                for qi, qj in my_path[:-1]:
+                    dqi = qi - pivot_i
+                    dqj = qj - pivot_j
+                    if (dqi, dqj) in bridge_vectors:
+                        qp = env_ns.get((qi, qj))
+                        if qp and qp.get_type() == my_piece:
+                            bonus += 20.0  # "compléter un bridge" autour de my_path[-1]
+                            break
+
+        return bonus
