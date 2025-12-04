@@ -127,8 +127,9 @@ class MyPlayer(PlayerHex):
         
         if minutes_left <= 90:  # Less than 1 minute
             return 3
-        # eventually we can add more conditions for different time thresholds
-
+        else:
+            return self.max_depth
+        
     def minimax_search(self, current_state: GameState, current_hash: int, depth: int = None) -> Action:
         if depth is None:
             depth = self.max_depth
