@@ -17,6 +17,7 @@ PLAYERS = [
     "gumball.py",
     "bobynettebridge.py",
     "bob.py",
+    "greedy_player_hex.py",
 ]
 
 def run_single_match(args):
