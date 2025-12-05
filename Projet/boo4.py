@@ -34,7 +34,7 @@ class MyPlayer(PlayerHex):
         self._is_horizontal_cache = {}
         self._board_size = None
 
-        self._neighbors = self._precompute_neighbors(radius=2)
+        self._neighbors = self.precompute_neighbors(radius=2)
 
         self.killer_moves = {}
 
@@ -464,7 +464,7 @@ class MyPlayer(PlayerHex):
         env = board.get_env()
 
         if self._board_size != board_size:
-            self._initialize_cache(board_size)
+            self.initialize_cache(board_size)
 
         sources = self._sources_cache[piece_type]
         destinations = self._destinations_cache[piece_type]
