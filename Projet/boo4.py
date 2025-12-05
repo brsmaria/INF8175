@@ -464,7 +464,7 @@ class MyPlayer(PlayerHex):
         env = board.get_env()
 
         if self._board_size != board_size:
-            self.initialize_cache(board_size)
+            self._initialize_cache(board_size)
 
         sources = self._sources_cache[piece_type]
         destinations = self._destinations_cache[piece_type]
