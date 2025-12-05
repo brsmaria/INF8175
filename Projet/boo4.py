@@ -34,7 +34,7 @@ class MyPlayer(PlayerHex):
         self._is_horizontal_cache = {}
         self._board_size = None
 
-        self._neighbors = self.precompute_neighbors(radius=2)
+        self._neighbors = self._precompute_neighbors(radius=2)
 
         self.killer_moves = {}
 
